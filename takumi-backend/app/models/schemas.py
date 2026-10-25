@@ -9,7 +9,14 @@ EvidenceType = Literal["video_segment", "expert_response", "reviewer_correction"
 SourceLabel = Literal["real", "illustrative"]
 Disposition = Literal["answered", "premise_rejected", "unobservable", "deferred"]
 ClarificationStatus = Literal["pending", "answered", "premise_rejected", "unobservable", "deferred"]
-GapType = Literal["missing_reasoning", "changed_condition", "beginner_mistake"]
+GapType = Literal[
+    "missing_reasoning",
+    "changed_condition",
+    "beginner_mistake",
+    "missing_cue",
+    "missing_exception",
+    "unobservable_information",
+]
 QAStatus = Literal["answered", "needs_context", "insufficient_evidence"]
 
 
@@ -113,6 +120,32 @@ class ClarificationOut(BaseModel):
     answer: str | None = None
     evidence_id: str | None = None
     answered_at: datetime | None = None
+
+
+class ClarificationGenerate(RequestModel):
+    draft_id: str
+    expected_revision: int = Field(ge=1)
+    mode: Literal["live", "deterministic"] = "live"
+    request_id: str = Field(min_length=1, max_length=100)
+
+
+class GeneratedClarificationOut(ClarificationOut):
+    evidence_ids: list[str]
+    missing_information: str
+    rationale: str
+
+
+class ClarificationGenerateOut(BaseModel):
+    generation_id: str
+    draft_id: str
+    revision: int
+    generation_mode: Literal["live", "deterministic", "fallback"]
+    status: Literal["completed", "stale"]
+    provider: str | None = None
+    model_id: str | None = None
+    prompt_version: str | None = None
+    warnings: list[str]
+    questions: list[GeneratedClarificationOut]
 
 
 class TaskCreate(RequestModel):

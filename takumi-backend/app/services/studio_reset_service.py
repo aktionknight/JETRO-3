@@ -15,6 +15,7 @@ from app.models.entities import (
     Release,
     Task,
 )
+from app.models.knowledge_ai import KnowledgeAIRun
 from app.models.studio import (
     StudioAudit,
     StudioAuthorization,
@@ -65,6 +66,7 @@ def reset(session, task_id, expected_revision):
         saved.version += 1
         saved.updated_at = utcnow()
     for model in (
+        KnowledgeAIRun,
         StudioAnalysisRun,
         StudioAudit,
         StudioAuthorization,

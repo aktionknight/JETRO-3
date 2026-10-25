@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     enable_multilingual: bool = False
     enable_embeddings: bool = False
     enable_advanced_retrieval: bool = False
+    enable_qa_support_validation: bool = True
+    enable_ai_eval_logging: bool = True
+    enable_deterministic_gap_fallback: bool = True
+    enable_qa_abstention: bool = True
+    enable_ai_viva_scoring: bool = False
     log_level: str = "INFO"
     log_model_inputs: bool = False
     cors_origins: str = "http://localhost:3000"
@@ -77,11 +82,10 @@ class Settings(BaseSettings):
                 )
         reserved = {
             "log_model_inputs": 6,
-            "enable_live_gap_generation": 6,
-            "enable_live_qa": 6,
             "enable_multilingual": 6,
             "enable_embeddings": 6,
             "enable_advanced_retrieval": 6,
+            "enable_ai_viva_scoring": 6,
         }
         for field, checkpoint in reserved.items():
             if getattr(self, field):
@@ -112,6 +116,15 @@ class Settings(BaseSettings):
             raise ValueError(
                 "AI_PROVIDER=openrouter requires OPENROUTER_API_KEY, OPENROUTER_MODEL "
                 "and WHISPER_BASE_URL"
+            )
+        for field in ("enable_live_gap_generation", "enable_live_qa"):
+            if getattr(self, field) and self.ai_provider != "gemini":
+                raise ValueError(f"{field.upper()} requires AI_PROVIDER=gemini")
+        if self.enable_live_qa and not (
+            self.enable_qa_support_validation and self.enable_qa_abstention
+        ):
+            raise ValueError(
+                "ENABLE_LIVE_QA requires ENABLE_QA_SUPPORT_VALIDATION and ENABLE_QA_ABSTENTION"
             )
         if self.enable_live_extraction and not (
             self.ai_provider in ("gemini", "ollama", "openrouter") and self.enable_media_processing

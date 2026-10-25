@@ -10,14 +10,14 @@
     "status": 200,
     "body": {
       "status": "answered",
-      "release_id": "release_2b742612c999",
+      "release_id": "release_4216d88b245c",
       "claims": [
         {
           "text": "Illustrative: possible seal or bearing damage",
           "knowledge_unit_id": "ku_001",
           "field": "interpretation",
           "evidence_ids": [
-            "ev_e25a26fae480"
+            "ev_a3544e932301"
           ]
         },
         {
@@ -25,7 +25,7 @@
           "knowledge_unit_id": "ku_001",
           "field": "cue",
           "evidence_ids": [
-            "ev_e25a26fae480"
+            "ev_a3544e932301"
           ]
         },
         {
@@ -33,7 +33,7 @@
           "knowledge_unit_id": "ku_001",
           "field": "decision",
           "evidence_ids": [
-            "ev_e25a26fae480"
+            "ev_a3544e932301"
           ]
         }
       ],

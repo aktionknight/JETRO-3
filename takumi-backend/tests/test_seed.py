@@ -103,9 +103,33 @@ def test_schema_v1_additive_upgrade(client):
     init_db(client.app.state.engine)
     with client.app.state.engine.begin() as connection:
         assert (
-            connection.scalar(text("SELECT value FROM app_meta WHERE key='schema_version'")) == "7"
+            connection.scalar(text("SELECT value FROM app_meta WHERE key='schema_version'")) == "8"
         )
     tables = inspect(client.app.state.engine).get_table_names()
     assert "media_assets" in tables
     assert "learning_enrollments" in tables
     assert "studio_analysis_runs" in tables
+    assert "knowledge_ai_runs" in tables
+
+
+def test_schema_v7_upgrade_preserves_releases_and_clarifications(make_client):
+    from sqlalchemy import inspect, text
+
+    snapshot = "SELECT id, content_hash FROM releases ORDER BY id"
+    clarifications = "SELECT id, status, answer FROM clarifications ORDER BY id"
+    with make_client(demo_seed_state="approved_baseline") as client:
+        engine = client.app.state.engine
+        with engine.begin() as connection:
+            releases_before = connection.execute(text(snapshot)).all()
+            clarifications_before = connection.execute(text(clarifications)).all()
+            connection.execute(text("DROP TABLE knowledge_ai_runs"))
+            connection.execute(text("UPDATE app_meta SET value='7' WHERE key='schema_version'"))
+        init_db(engine)
+        with engine.begin() as connection:
+            version = connection.scalar(
+                text("SELECT value FROM app_meta WHERE key='schema_version'")
+            )
+            assert version == "8"
+            assert releases_before and connection.execute(text(snapshot)).all() == releases_before
+            assert connection.execute(text(clarifications)).all() == clarifications_before
+        assert "knowledge_ai_runs" in inspect(engine).get_table_names()

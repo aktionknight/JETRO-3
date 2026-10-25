@@ -10,7 +10,7 @@
     "status": 200,
     "body": {
       "status": "insufficient_evidence",
-      "release_id": "release_2b742612c999",
+      "release_id": "release_4216d88b245c",
       "claims": [],
       "missing_information": [
         "The approved knowledge pack does not contain this information."

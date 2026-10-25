@@ -343,6 +343,63 @@
         }
       }
     },
+    "/api/v1/tasks/{task_id}/clarifications/generate": {
+      "post": {
+        "tags": [
+          "clarifications"
+        ],
+        "summary": "Generate",
+        "operationId": "generate_api_v1_tasks__task_id__clarifications_generate_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClarificationGenerate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClarificationGenerateOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tasks/{task_id}/publish": {
       "post": {
         "tags": [
@@ -2209,6 +2266,133 @@
         ],
         "title": "Claim"
       },
+      "ClarificationGenerate": {
+        "properties": {
+          "draft_id": {
+            "type": "string",
+            "title": "Draft Id"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Revision"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "live",
+              "deterministic"
+            ],
+            "title": "Mode",
+            "default": "live"
+          },
+          "request_id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Request Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "draft_id",
+          "expected_revision",
+          "request_id"
+        ],
+        "title": "ClarificationGenerate"
+      },
+      "ClarificationGenerateOut": {
+        "properties": {
+          "generation_id": {
+            "type": "string",
+            "title": "Generation Id"
+          },
+          "draft_id": {
+            "type": "string",
+            "title": "Draft Id"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "generation_mode": {
+            "type": "string",
+            "enum": [
+              "live",
+              "deterministic",
+              "fallback"
+            ],
+            "title": "Generation Mode"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "stale"
+            ],
+            "title": "Status"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/GeneratedClarificationOut"
+            },
+            "type": "array",
+            "title": "Questions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generation_id",
+          "draft_id",
+          "revision",
+          "generation_mode",
+          "status",
+          "warnings",
+          "questions"
+        ],
+        "title": "ClarificationGenerateOut"
+      },
       "ClarificationOut": {
         "properties": {
           "id": {
@@ -2239,7 +2423,10 @@
             "enum": [
               "missing_reasoning",
               "changed_condition",
-              "beginner_mistake"
+              "beginner_mistake",
+              "missing_cue",
+              "missing_exception",
+              "unobservable_information"
             ],
             "title": "Gap Type"
           },
@@ -2846,6 +3033,111 @@
           "created_at"
         ],
         "title": "EvidenceItemOut"
+      },
+      "GeneratedClarificationOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "knowledge_unit_id": {
+            "type": "string",
+            "title": "Knowledge Unit Id"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "answered",
+              "premise_rejected",
+              "unobservable",
+              "deferred"
+            ],
+            "title": "Status"
+          },
+          "gap_type": {
+            "type": "string",
+            "enum": [
+              "missing_reasoning",
+              "changed_condition",
+              "beginner_mistake",
+              "missing_cue",
+              "missing_exception",
+              "unobservable_information"
+            ],
+            "title": "Gap Type"
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "evidence_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Id"
+          },
+          "answered_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered At"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence Ids"
+          },
+          "missing_information": {
+            "type": "string",
+            "title": "Missing Information"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "knowledge_unit_id",
+          "question",
+          "status",
+          "gap_type",
+          "priority",
+          "evidence_ids",
+          "missing_information",
+          "rationale"
+        ],
+        "title": "GeneratedClarificationOut"
       },
       "HTTPValidationError": {
         "properties": {

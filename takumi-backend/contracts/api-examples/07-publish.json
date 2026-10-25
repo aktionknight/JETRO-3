@@ -10,12 +10,12 @@
   "response": {
     "status": 201,
     "body": {
-      "release_id": "release_2b742612c999",
+      "release_id": "release_4216d88b245c",
       "task_id": "task_001",
       "version": 1,
       "status": "active",
       "approved_by": "reviewer_001",
-      "content_hash": "1c31f1ebd76a520a0eb38575e3e30758c228184e88e8c4c3abdafe74015d2490"
+      "content_hash": "ef9920eb481b5f0638f6f219b1e7505e5b727870cbe186e9c228942e06717626"
     }
   }
 }

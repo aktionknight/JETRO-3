@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "path": "/api/v1/releases/release_2b742612c999/training-pack",
+    "path": "/api/v1/releases/release_4216d88b245c/training-pack",
     "body": null
   },
   "response": {
@@ -9,15 +9,15 @@
     "body": {
       "schema_version": "1.0",
       "task_id": "task_001",
-      "release_id": "release_2b742612c999",
+      "release_id": "release_4216d88b245c",
       "version": 1,
       "title": "Shaft and Bearing Inspection",
       "equipment": "Unpowered Shaft-and-Bearing Bench Assembly",
       "language": "en",
       "source_label": "illustrative",
       "approved_by": "reviewer_001",
-      "approved_at": "2026-10-24T16:43:35.143688",
-      "content_hash": "1c31f1ebd76a520a0eb38575e3e30758c228184e88e8c4c3abdafe74015d2490",
+      "approved_at": "2026-10-25T05:09:28.969683",
+      "content_hash": "ef9920eb481b5f0638f6f219b1e7505e5b727870cbe186e9c228942e06717626",
       "knowledge_units": [
         {
           "id": "ku_001",
@@ -28,20 +28,20 @@
           "exception": null,
           "evidence_ids": [
             "ev_001",
-            "ev_e25a26fae480"
+            "ev_a3544e932301"
           ],
           "field_evidence": {
             "action": [
               "ev_001"
             ],
             "cue": [
-              "ev_e25a26fae480"
+              "ev_a3544e932301"
             ],
             "interpretation": [
-              "ev_e25a26fae480"
+              "ev_a3544e932301"
             ],
             "decision": [
-              "ev_e25a26fae480"
+              "ev_a3544e932301"
             ]
           }
         },
@@ -119,7 +119,7 @@
           "end_ms": 60000
         },
         {
-          "id": "ev_e25a26fae480",
+          "id": "ev_a3544e932301",
           "type": "expert_response",
           "author": "Demo Expert",
           "content": "Illustrative example: I look at the housing first for grease leaking at the seal or discoloration. Leaking grease suggests the seal or bearing may be damaged, so I do not rotate the shaft until a supervisor has checked it.",

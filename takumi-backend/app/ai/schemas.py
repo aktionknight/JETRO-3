@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.schemas import Claim, EvidenceType, GapType, KnowledgeUnit, QAStatus, SourceLabel
 
@@ -54,6 +54,38 @@ class ApprovedContext(BaseModel):
     release_id: str
     knowledge_units: list[KnowledgeUnit]
     evidence_ids: set[str]
+    evidence_items: list[dict] = Field(default_factory=list)
+
+
+class _Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class GapCandidate(_Strict):
+    knowledge_unit_id: str
+    gap_type: GapType
+    missing_information: str = Field(min_length=1, max_length=1000)
+    rationale: str = Field(min_length=1, max_length=1000)
+    evidence_ids: list[str] = Field(max_length=10)
+    suggested_question: str = Field(min_length=1, max_length=500)
+    importance: int = Field(ge=1, le=5)
+    requires_expert: bool = True
+
+
+class GapAnalysis(_Strict):
+    candidates: list[GapCandidate] = Field(max_length=12)
+    warnings: list[str] = Field(default_factory=list, max_length=10)
+
+
+class GroundedClaim(Claim):
+    model_config = ConfigDict(extra="forbid")
+
+
+class GroundedAnswer(_Strict):
+    status: QAStatus
+    claims: list[GroundedClaim] = Field(default_factory=list, max_length=5)
+    missing_information: list[str] = Field(default_factory=list, max_length=5)
+    review_required: bool = False
 
 
 class QAProviderResult(BaseModel):

@@ -177,7 +177,7 @@ Opt in with a real key, model and recording:
 ```sh
 TAKUMI_LIVE_GEMINI=1 GEMINI_API_KEY=… GEMINI_MODEL=… TAKUMI_LIVE_VIDEO=/path/to.mp4 uv run pytest tests/test_gemini_live.py
 ```
-See [V2_CHECKPOINTS.md](docs/V2_CHECKPOINTS.md) for observed checkpoint evidence and final verification status.
+See [V2_CHECKPOINTS.md](docs/V2_CHECKPOINTS.md) and [V3_CHECKPOINTS.md](docs/V3_CHECKPOINTS.md) for observed checkpoint evidence and final verification status. V3 evaluation: [AI_EVALUATION.md](docs/AI_EVALUATION.md); `uv run python scripts/run_evals.py --mode deterministic --output /tmp/takumi-v3-evals.json`; HTTP acceptance: `uv run python scripts/v3_flow.py --task-id <task> --generate-only`.
 
 ## Feature flags
 | Setting | Default | Behavior |
@@ -186,10 +186,14 @@ See [V2_CHECKPOINTS.md](docs/V2_CHECKPOINTS.md) for observed checkpoint evidence
 | DEMO_SEED_STATE | approved_baseline | Initial release_001 |
 | ENABLE_GROUNDED_QA | true | Answers only from release snapshots |
 | ENABLE_TRAINING_PACK_EXPORT | true | Immutable release export |
-| AI_PROVIDER | fixture | fixture, gemini, ollama or openrouter; Q&A/gaps remain deterministic |
+| AI_PROVIDER | fixture | fixture, gemini, ollama or openrouter; Q&A/gaps stay deterministic unless the V3 live flags below are on |
 | ENABLE_MEDIA_UPLOAD, ENABLE_MEDIA_STREAMING | false | Validated uploads and private ranged playback (C4) |
 | ENABLE_LIVE_EXTRACTION, ENABLE_MEDIA_PROCESSING, ENABLE_PROCESSING_WORKER | false | Gemini, Ollama or OpenRouter extraction, durable jobs and separate worker (C5) |
-| ENABLE_LIVE_GAP_GENERATION, ENABLE_LIVE_QA, ENABLE_MULTILINGUAL, ENABLE_EMBEDDINGS, ENABLE_ADVANCED_RETRIEVAL, LOG_MODEL_INPUTS | false | Reserved Checkpoint 6 |
+| ENABLE_LIVE_GAP_GENERATION | false | Gemini contextual clarifications via `POST /tasks/{id}/clarifications/generate` (V3 C6A); requires AI_PROVIDER=gemini |
+| ENABLE_LIVE_QA | false | Gemini grounded Q&A with exact approved-field claims (V3 C6B); requires AI_PROVIDER=gemini |
+| ENABLE_QA_SUPPORT_VALIDATION, ENABLE_QA_ABSTENTION | true | Must stay true when ENABLE_LIVE_QA=true |
+| ENABLE_AI_EVAL_LOGGING, ENABLE_DETERMINISTIC_GAP_FALLBACK | true | Usage/latency and Q&A call logs; labelled deterministic fallback on gap-generation failure |
+| ENABLE_MULTILINGUAL, ENABLE_EMBEDDINGS, ENABLE_ADVANCED_RETRIEVAL, ENABLE_AI_VIVA_SCORING, LOG_MODEL_INPUTS | false | Reserved |
 
 Reserved capabilities fail at startup when enabled. Disabled optional endpoints return HTTP 501 `FEATURE_DISABLED`. Core lifecycle and authentication have no off switch. `.env.example` lists every setting.
 

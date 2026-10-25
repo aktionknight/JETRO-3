@@ -19,6 +19,7 @@ from app.models.entities import (
     Release,
     Task,
 )
+from app.models.knowledge_ai import KnowledgeAIRun
 from app.models.schemas import ClarificationRespond, PublishRequest
 from app.models.studio import (
     StudioAudit,
@@ -128,6 +129,7 @@ def reset_demo(session, state: Literal["fresh", "approved_baseline"] = "fresh") 
     draft_ids = select(Draft.id).where(Draft.task_id == FIXTURE_TASK_ID)
     session.execute(delete(DraftRevision).where(DraftRevision.draft_id.in_(draft_ids)))
     for model in (
+        KnowledgeAIRun,
         StudioAnalysisRun,
         StudioCourseContent,
         StudioAudit,

@@ -31,6 +31,8 @@ uv run python scripts/video_flow.py --video demo.mp4   # upload, range, process,
 uv run python scripts/seed_demo.py --state fresh|approved_baseline
 uv run python scripts/reset_demo.py --state fresh --yes
 uv run python scripts/export_contracts.py
+uv run python scripts/run_evals.py --mode deterministic --output /tmp/takumi-v3-evals.json   # V3 offline evals
+uv run python scripts/v3_flow.py --base-url http://localhost:8001 --task-id <task> --generate-only   # V3 HTTP acceptance; resume adds --answer/--question
 ```
 Python 3.11 (`.python-version`), managed by uv. Never hand-edit `uv.lock`; use `uv add`.
 
@@ -46,9 +48,10 @@ Python 3.11 (`.python-version`), managed by uv. Never hand-edit `uv.lock`; use `
 - Errors: raise `AppError(code, message, status, details)` → `{"error":{code,message,details}}`. Disabled features use `feature_disabled(...)` (HTTP 501). Codes are stable; see the handoff doc table.
 - Illustrative demo content lives only in `app/fixtures/shaft_bearing_v1.json` and stays labelled `illustrative`. Never invent torque, tolerance or tactile claims.
 - Releases are immutable (SQLite UPDATE trigger); status (`active`/`superseded`) is derived from `Task.active_release_id`.
-- Q&A answers only from the active release snapshot; `qa_service` drops any claim whose evidence is not in that snapshot.
+- Q&A answers only from the active release snapshot; claims must cite release evidence of that field, and live claims must equal a whole approved field (`ENABLE_LIVE_QA` requires support validation and abstention).
 - Draft edits go through `knowledge_service.apply_field_updates` + `bump_draft` (optimistic revision check, `REVISION_CONFLICT` 409).
-- AI interfaces live in `app/ai/base.py`: `KnowledgeAIProvider` stays fixture-backed for Q&A/gaps; `VideoExtractor` uses Gemini for worker video extraction. Live Gemini extraction is unverified without a successful real-key run.
+- AI interfaces live in `app/ai/base.py`: `KnowledgeAIProvider` stays fixture-backed for deterministic Q&A/gaps; `VideoExtractor` uses Gemini for worker video extraction. Live gap generation and grounded Q&A call `app/ai/knowledge.py:KnowledgeAI` from services (tests monkeypatch `app.ai.knowledge.KnowledgeAI`). Prompts are versioned in `app/ai/prompts/registry.py`; never edit a released prompt in place.
+- Gap generation (`POST /tasks/{id}/clarifications/generate`) persists receipts in `knowledge_ai_runs`; never bump the draft revision there.
 
 ## Testing
 - `tests/conftest.py`: `make_client(**settings_overrides)` context manager (temp SQLite DB per test, `demo_seed_state="fresh"`), `client` fixture, `auth(client, role)` helper.
@@ -56,4 +59,4 @@ Python 3.11 (`.python-version`), managed by uv. Never hand-edit `uv.lock`; use `
 - Contract examples in `contracts/api-examples/` contain generated ids/timestamps; regenerating them produces id churn only.
 
 ## Docs
-`takumi-backend/README.md`, `takumi-backend/docs/{INTEGRATION_HANDOFF,CHECKPOINTS,V2_CHECKPOINTS,KNOWN_LIMITATIONS}.md`, `takumi-backend/{IMPLEMENTATION_PLAN,V2_IMPLEMENTATION_PLAN}.md`.
+`takumi-backend/README.md`, `takumi-backend/docs/{INTEGRATION_HANDOFF,CHECKPOINTS,V2_CHECKPOINTS,V3_CHECKPOINTS,V3_IMPLEMENTATION_PLAN,AI_EVALUATION,KNOWN_LIMITATIONS}.md`, `takumi-backend/{IMPLEMENTATION_PLAN,V2_IMPLEMENTATION_PLAN}.md`.

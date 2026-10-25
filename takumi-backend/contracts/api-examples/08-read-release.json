@@ -7,14 +7,14 @@
   "response": {
     "status": 200,
     "body": {
-      "id": "release_2b742612c999",
+      "id": "release_4216d88b245c",
       "task_id": "task_001",
       "version": 1,
       "status": "active",
       "approved_by": "reviewer_001",
-      "approved_at": "2026-10-24T16:43:35.143688",
+      "approved_at": "2026-10-25T05:09:28.969683",
       "approval_note": "Demo flow reviewer approval.",
-      "content_hash": "1c31f1ebd76a520a0eb38575e3e30758c228184e88e8c4c3abdafe74015d2490",
+      "content_hash": "ef9920eb481b5f0638f6f219b1e7505e5b727870cbe186e9c228942e06717626",
       "knowledge_units": [
         {
           "id": "ku_001",
@@ -25,20 +25,20 @@
           "exception": null,
           "evidence_ids": [
             "ev_001",
-            "ev_e25a26fae480"
+            "ev_a3544e932301"
           ],
           "field_evidence": {
             "action": [
               "ev_001"
             ],
             "cue": [
-              "ev_e25a26fae480"
+              "ev_a3544e932301"
             ],
             "interpretation": [
-              "ev_e25a26fae480"
+              "ev_a3544e932301"
             ],
             "decision": [
-              "ev_e25a26fae480"
+              "ev_a3544e932301"
             ]
           },
           "review_status": "approved"
@@ -99,7 +99,7 @@
           "start_ms": 25000,
           "end_ms": 41000,
           "source_label": "illustrative",
-          "created_at": "2026-10-24T16:43:34.892971"
+          "created_at": "2026-10-25T05:09:28.899118"
         },
         {
           "id": "ev_003",
@@ -112,7 +112,7 @@
           "start_ms": null,
           "end_ms": null,
           "source_label": "illustrative",
-          "created_at": "2026-10-24T16:43:34.893129"
+          "created_at": "2026-10-25T05:09:28.899192"
         },
         {
           "id": "ev_004",
@@ -125,10 +125,10 @@
           "start_ms": 52000,
           "end_ms": 60000,
           "source_label": "illustrative",
-          "created_at": "2026-10-24T16:43:34.893221"
+          "created_at": "2026-10-25T05:09:28.899240"
         },
         {
-          "id": "ev_e25a26fae480",
+          "id": "ev_a3544e932301",
           "task_id": "task_001",
           "type": "expert_response",
           "author": "Demo Expert",
@@ -138,7 +138,7 @@
           "start_ms": null,
           "end_ms": null,
           "source_label": "real",
-          "created_at": "2026-10-24T16:43:35.069381"
+          "created_at": "2026-10-25T05:09:28.920482"
         }
       ]
     }

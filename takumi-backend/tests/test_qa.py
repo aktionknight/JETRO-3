@@ -177,3 +177,29 @@ def test_empty_and_unmatched_context():
     assert (
         deterministic_answer("Unknown component", "en", context).status == "insufficient_evidence"
     )
+
+
+def test_rank_units_weight_frequency_synonyms_and_stable_ties():
+    from app.services.qa_matching import CONTENT_FIELDS, rank_units
+
+    def unit(id, action, cue=""):
+        return dict.fromkeys(CONTENT_FIELDS, "") | {"id": id, "action": action, "cue": cue}
+
+    units = [
+        unit("common", "bearing", "gage"),
+        unit("specific", "gauge identification bolt turn bearing"),
+        unit("tie", "gauge identification bolt turn bearing"),
+    ]
+    assert [u["id"] for u in rank_units("gage id fastener rotate", units)] == [
+        "specific",
+        "tie",
+        "common",
+    ]
+    assert rank_units("unrelated", units) == []
+    assert rank_units("bearing", units, limit=1)[0]["id"] == "common"
+    assert rank_units("gauge", [unit("cue", "", "gauge"), unit("action", "gauge")])[0]["id"] == (
+        "action"
+    )
+    rare = [unit("common", "bearing bearing"), unit("rare", "", "wobble")]
+    rare += [unit(f"other-{i}", "bearing") for i in range(3)]
+    assert rank_units("bearing wobble", rare, limit=1)[0]["id"] == "rare"

@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 class Base(DeclarativeBase):
@@ -51,6 +51,7 @@ def build_engine(settings):
 
 
 def init_db(engine):
+    import app.models.knowledge_ai  # noqa: F401  (register table before create_all)
     from app.models.entities import AppMeta
 
     Base.metadata.create_all(engine)

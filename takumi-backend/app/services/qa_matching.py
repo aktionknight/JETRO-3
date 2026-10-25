@@ -122,6 +122,73 @@ def stem(token):
     return token
 
 
+def _value(unit, field):
+    return unit.get(field) if isinstance(unit, dict) else getattr(unit, field)
+
+
+def _terms(text):
+    equivalents = {
+        "gage": "gauge",
+        "id": "identification",
+        "rotat": "turn",
+        "rotate": "turn",
+        "fastener": "bolt",
+    }
+    return {
+        equivalents.get(stem(token), stem(token))
+        for token in normalize(text)
+        if token not in STOPWORDS
+    }
+
+
+def rank_units(question, units, limit=3):
+    query = _terms(question)
+    documents = [
+        {field: _terms(_value(unit, field) or "") for field in CONTENT_FIELDS} for unit in units
+    ]
+    frequency = {
+        term: sum(any(term in words for words in document.values()) for document in documents)
+        for term in query
+    }
+    scores = [
+        sum(
+            (3 if field == "action" else 1) / frequency[term]
+            for field, words in document.items()
+            for term in query & words
+        )
+        for document in documents
+    ]
+    return [
+        units[index]
+        for index in sorted(range(len(units)), key=lambda index: -scores[index])
+        if scores[index] > 0
+    ][:limit]
+
+
+def question_guard(question, language, units):
+    """Return server-owned abstention status/message, or allow retrieval."""
+    if language != "en":
+        return "needs_context", LANGUAGE_MSG
+    if not _terms(question):
+        return "needs_context", NEEDS_CONTEXT_MSG
+    selected = rank_units(question, units)
+    if not selected:
+        return "insufficient_evidence", INSUFFICIENT_MSG
+    approved_tokens = {
+        token
+        for unit in selected
+        for field in CONTENT_FIELDS
+        for token in normalize(_value(unit, field) or "")
+    }
+    tokens = set(normalize(question))
+    if (tokens & SPEC_TERMS) - approved_tokens:
+        return "insufficient_evidence", INSUFFICIENT_MSG
+    physical_cues = {"feel", "felt", "tactile"}
+    if tokens & physical_cues and not approved_tokens & physical_cues:
+        return "insufficient_evidence", INSUFFICIENT_MSG
+    return None
+
+
 def deterministic_answer(question, language, context: ApprovedContext) -> QAProviderResult:
     def result(status, message=None, claims=None):
         return QAProviderResult(
@@ -131,31 +198,18 @@ def deterministic_answer(question, language, context: ApprovedContext) -> QAProv
             provenance=Provenance(provider="fixture"),
         )
 
-    if language != "en":
-        return result("needs_context", LANGUAGE_MSG)
-    tokens = normalize(question)
-    unit_tokens = [
-        normalize(" ".join(getattr(unit, field) or "" for field in CONTENT_FIELDS))
-        for unit in context.knowledge_units
-    ]
-    approved_tokens = {token for words in unit_tokens for token in words}
-    if (set(tokens) & SPEC_TERMS) - approved_tokens:
-        return result("insufficient_evidence", INSUFFICIENT_MSG)
+    guard = question_guard(question, language, context.knowledge_units)
+    if guard:
+        return result(*guard)
     fields = next(
         (fields for regex, fields in INTENTS if re.search(regex, question.lower())), CONTENT_FIELDS
     )
-    content = {stem(token) for token in tokens if token not in STOPWORDS}
-    if not content:
-        return result("needs_context", NEEDS_CONTEXT_MSG)
-    scores = [len(content & {stem(token) for token in words}) for words in unit_tokens]
-    if not scores or max(scores) == 0:
-        return result("insufficient_evidence", INSUFFICIENT_MSG)
-    unit = context.knowledge_units[scores.index(max(scores))]
+    unit = rank_units(question, context.knowledge_units, limit=1)[0]
     claims = []
     for field in fields:
         value = getattr(unit, field)
         evidence_ids = unit.field_evidence.get(field, [])
-        if value is not None and set(evidence_ids) <= context.evidence_ids:
+        if value is not None and evidence_ids and set(evidence_ids) <= context.evidence_ids:
             claims.append(
                 Claim(text=value, knowledge_unit_id=unit.id, field=field, evidence_ids=evidence_ids)
             )

@@ -21,20 +21,20 @@
           "exception": null,
           "evidence_ids": [
             "ev_001",
-            "ev_e25a26fae480"
+            "ev_a3544e932301"
           ],
           "field_evidence": {
             "action": [
               "ev_001"
             ],
             "cue": [
-              "ev_e25a26fae480"
+              "ev_a3544e932301"
             ],
             "interpretation": [
-              "ev_e25a26fae480"
+              "ev_a3544e932301"
             ],
             "decision": [
-              "ev_e25a26fae480"
+              "ev_a3544e932301"
             ]
           },
           "review_status": "draft"
@@ -92,8 +92,8 @@
           "gap_type": "missing_reasoning",
           "priority": 10,
           "answer": "Illustrative example: I look at the housing first for grease leaking at the seal or discoloration. Leaking grease suggests the seal or bearing may be damaged, so I do not rotate the shaft until a supervisor has checked it.",
-          "evidence_id": "ev_e25a26fae480",
-          "answered_at": "2026-10-24T16:43:35.074393"
+          "evidence_id": "ev_a3544e932301",
+          "answered_at": "2026-10-25T05:09:28.922019"
         },
         {
           "id": "clar_002",

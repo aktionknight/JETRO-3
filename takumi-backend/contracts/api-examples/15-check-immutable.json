@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "PATCH",
-    "path": "/api/v1/releases/release_2b742612c999",
+    "path": "/api/v1/releases/release_4216d88b245c",
     "body": {}
   },
   "response": {

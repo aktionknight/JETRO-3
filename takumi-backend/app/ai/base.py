@@ -34,7 +34,8 @@ class KnowledgeAIProvider(Protocol):
 def get_ai_provider(settings) -> KnowledgeAIProvider:
     from app.ai.fixture_provider import FixtureAIProvider
 
-    # Q&A and gap detection stay deterministic in V2; live providers only do worker extraction.
+    # Deterministic provider for seed, extraction gaps and fixture Q&A. Explicit live text
+    # operations (gap elicitation, grounded Q&A) are orchestrated by services via KnowledgeAI.
     if settings.ai_provider in ("fixture", "gemini", "ollama", "openrouter"):
         return FixtureAIProvider()
     raise AppError("AI_PROVIDER_UNAVAILABLE", "Configured AI provider is not available.", 503)

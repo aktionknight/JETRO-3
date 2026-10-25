@@ -27,7 +27,10 @@
       "enum": [
         "missing_reasoning",
         "changed_condition",
-        "beginner_mistake"
+        "beginner_mistake",
+        "missing_cue",
+        "missing_exception",
+        "unobservable_information"
       ],
       "title": "Gap Type",
       "type": "string"

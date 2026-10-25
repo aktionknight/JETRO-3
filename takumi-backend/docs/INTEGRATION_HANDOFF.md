@@ -16,12 +16,13 @@ Roles: **all** = expert, reviewer, apprentice; **editors** = expert, reviewer. E
 | GET /tasks/{task_id}/draft | Editable draft and gaps | editors | — → DraftOut | 02-read-draft.json | DRAFT_NOT_FOUND | — |
 | PATCH /tasks/{task_id}/draft | Field/interval corrections and unit review | editors | DraftPatch → DraftPatchOut | `{"expected_revision":1,"changes":[{"knowledge_unit_id":"ku_001","fields":{"cue":null}}]}` | REVISION_CONFLICT, KNOWLEDGE_UNIT_NOT_FOUND, UNIT_NOT_APPROVABLE, INVALID_EVIDENCE | — |
 | POST /clarifications/{clarification_id}/respond | Expert answer and evidence | editors | ClarificationRespond → ClarificationRespondOut | 04-answer-clarification.json | CLARIFICATION_NOT_FOUND, INVALID_STATE_TRANSITION, INVALID_KNOWLEDGE_UPDATE, REVISION_CONFLICT | — |
+| POST /tasks/{task_id}/clarifications/generate | Contextual clarification questions for an existing draft (V3) | editors | ClarificationGenerate → ClarificationGenerateOut (200; replay 200) | `{"draft_id":"draft_001","expected_revision":1,"mode":"live","request_id":"r-1"}` | TASK_NOT_FOUND, DRAFT_NOT_FOUND, REVISION_CONFLICT, REQUEST_ID_CONFLICT, GENERATION_STALE, AI_CONTEXT_TOO_LARGE, provider 503 codes, FEATURE_DISABLED (`mode=live` only) | ENABLE_LIVE_GAP_GENERATION for `mode=live` |
 | GET /evidence/{evidence_id} | Resolve source | all | — → EvidenceItemOut | 05-read-evidence.json | EVIDENCE_NOT_FOUND | — |
 | POST /tasks/{task_id}/publish | Approve snapshot after evaluation | reviewer | PublishRequest → PublishOut (201; retry 200) | 07-publish.json | TASK_NOT_FOUND, DRAFT_NOT_FOUND, REVISION_CONFLICT, PUBLICATION_BLOCKED, EVALUATION_REQUIRED, AUTHORIZATION_REQUIRED | — |
 | GET /tasks/{task_id}/release | Active release | all | — → ReleaseOut | 08-read-release.json | NO_ACTIVE_RELEASE | — |
 | GET /releases/{release_id} | Specific immutable release | all | — → ReleaseOut | GET /api/v1/releases/release_001 | RELEASE_NOT_FOUND | — |
 | GET /releases/{release_id}/training-pack | Simulation pack | all | — → TrainingPack | 09-training-pack.json | RELEASE_NOT_FOUND, INTERNAL_ERROR, FEATURE_DISABLED | ENABLE_TRAINING_PACK_EXPORT |
-| POST /tasks/{task_id}/ask | Grounded explanation | all | AskRequest → AskOut | 10-ask-grounded.json; 12-ask-unsupported-spec.json | NO_ACTIVE_RELEASE, AI_PROVIDER_UNAVAILABLE, FEATURE_DISABLED | ENABLE_GROUNDED_QA |
+| POST /tasks/{task_id}/ask | Grounded explanation | all | AskRequest → AskOut | 10-ask-grounded.json; 12-ask-unsupported-spec.json | NO_ACTIVE_RELEASE, AI_PROVIDER_UNAVAILABLE, FEATURE_DISABLED, RELEASE_CHANGED, provider 503 codes (live) | ENABLE_GROUNDED_QA; live answers with ENABLE_LIVE_QA |
 | POST /demo/reset | Replace fixture task only | reviewer | DemoResetRequest → DemoResetOut | 01-reset-fresh.json | CONFIRMATION_REQUIRED, RESET_SCOPE_UNAVAILABLE, FEATURE_DISABLED | DEMO_MODE and ENABLE_DEMO_RESET |
 | POST /tasks/{task_id}/media | Upload validated MP4 | editors | multipart `file` → MediaOut (201) | See media workflow | TASK_NOT_FOUND, INVALID_MEDIA, MEDIA_TOO_LARGE, MEDIA_TOO_LONG, FFPROBE_UNAVAILABLE | ENABLE_MEDIA_UPLOAD |
 | GET /media/{media_id} | Metadata and signed playback URL | all; apprentice release visibility | — → MediaOut (200) | GET /api/v1/media/media_001 | MEDIA_NOT_FOUND | ENABLE_MEDIA_STREAMING |
@@ -162,6 +163,41 @@ Baseline startup already contains `release_001`. Before a live expert demo, revi
 {"scope":"full_demo","confirm":"RESET_DEMO_DATA","state":"fresh"}
 ```
 to `POST /api/v1/demo/reset`. This deletes and recreates only task_001 and its records, in one transaction. User tasks survive. `approved_baseline` uses the actual clarification and publication services; its ev_002 source stays illustrative. A manually entered demonstration answer is recorded as real user input even when the text is labelled illustrative.
+
+## V3 contextual clarifications and grounded Q&A
+
+`POST /tasks/{task_id}/clarifications/generate` asks for up to three new ranked
+questions on the current draft revision. `mode=deterministic` uses the existing
+missing-field detector; `mode=live` (needs `ENABLE_LIVE_GAP_GENERATION=true`) sends a
+bounded draft context to Gemini (`gap_elicitation_v1`). Every live candidate must
+name a supplied unit and only that unit's supplied evidence; invalid candidates are
+dropped with a warning (`CANDIDATE_UNKNOWN_UNIT`, `CANDIDATE_INVALID_EVIDENCE`, …).
+Prior `(unit, gap_type)` pairs are never asked again. On provider failure the result
+is `generation_mode=fallback`, `provider=fixture`, warning
+`DETERMINISTIC_FALLBACK:<code>`; with `ENABLE_DETERMINISTIC_GAP_FALLBACK=false` it
+returns 503 with the provider code and `details.retryable`. `CONTEXT_TRUNCATED`
+warns that trailing whole units were omitted from the model input.
+
+`request_id` is an idempotency key per task: an identical replay returns the stored
+result without a model call; a replay after the draft revision advanced returns
+`status=stale` with the original questions; a different payload returns 409
+`REQUEST_ID_CONFLICT`. If the draft revision or any clarification/evidence state
+changes during the model call, nothing is written and 409 `GENERATION_STALE` is
+returned. Generation never bumps the draft revision; generated questions are normal
+pending clarifications answered through the existing respond endpoint and still
+block publication until dispositioned. `GET /tasks/{id}/draft` keeps the original
+clarification shape; provenance (evidence IDs, rationale, missing information,
+model/prompt) is in the generate response and the `knowledge_ai_runs` ledger.
+
+With `ENABLE_LIVE_QA=true`, `POST /tasks/{task_id}/ask` keeps `AskOut` unchanged but
+answers through Gemini (`grounded_qa_v1`) over the top three approved units of the
+active release. Each claim must equal a whole approved field exactly and cite only
+that field's release evidence; any invalid claim turns the whole answer into
+`insufficient_evidence` with `review_required=true`. `missing_information` is always
+server-owned text. Provider failure returns 503 with the provider code and
+`details.retryable` (no fixture fallback). A release change during the call returns
+409 `RELEASE_CHANGED`. Call logs store status, claim count and dropped-reason codes,
+never question text.
 
 ## Media and extraction workflow (C4/C5)
 
@@ -310,6 +346,9 @@ Fixture task/draft/KU/clarification/evidence/release IDs are stable across demo 
 | MEDIA_TOO_LARGE | 413 |
 | FFPROBE_UNAVAILABLE | 503 |
 | DRAFT_ALREADY_EXISTS, PROCESSING_ALREADY_RUNNING | 409 |
+| REQUEST_ID_CONFLICT, GENERATION_STALE, RELEASE_CHANGED | 409 |
+| AI_CONTEXT_TOO_LARGE | 422 |
+| AI_OUTPUT_INVALID, PROCESSING_TIMEOUT, AI_PROVIDER_UNAVAILABLE, AI_PROVIDER_RATE_LIMITED, AI_PROVIDER_AUTH_FAILED, AI_MODEL_UNAVAILABLE, PROCESSING_FAILED | 503 (live generate/ask; `details.retryable`) |
 
 Worker failures appear in `JobOut.error` within a 200 polling response, not as polling HTTP failures:
 `AI_PROVIDER_RATE_LIMITED`, `AI_PROVIDER_AUTH_FAILED`, `AI_FILE_EXPIRED`, `AI_PROVIDER_UNAVAILABLE`,
