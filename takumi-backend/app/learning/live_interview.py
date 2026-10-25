@@ -147,7 +147,7 @@ async def _generate_text(
     contents: list[dict],
 ) -> str:
     """Generate examiner response text via Gemini generateContent."""
-    url = f"{GEMINI_BASE_URL}/models/{model_name}:generateContent?key={api_key}"
+    url = f"{GEMINI_BASE_URL}/models/{model_name}:generateContent"
     payload = {
         "systemInstruction": {"parts": [{"text": system_prompt}]},
         "contents": contents,
@@ -156,7 +156,7 @@ async def _generate_text(
             "maxOutputTokens": 300,
         },
     }
-    resp = await client.post(url, json=payload, timeout=20.0)
+    resp = await client.post(url, headers={"x-goog-api-key": api_key}, json=payload, timeout=20.0)
     resp.raise_for_status()
     data = resp.json()
     candidates = data.get("candidates", [])
@@ -175,7 +175,7 @@ async def _synthesize_speech(
     if not clean_text:
         return "", ""
 
-    url = f"{GEMINI_BASE_URL}/models/{TTS_MODEL}:generateContent?key={api_key}"
+    url = f"{GEMINI_BASE_URL}/models/{TTS_MODEL}:generateContent"
     payload = {
         "contents": [{"parts": [{"text": clean_text}]}],
         "generationConfig": {
@@ -183,7 +183,7 @@ async def _synthesize_speech(
             "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Aoede"}}},
         },
     }
-    resp = await client.post(url, json=payload, timeout=25.0)
+    resp = await client.post(url, headers={"x-goog-api-key": api_key}, json=payload, timeout=25.0)
     resp.raise_for_status()
     data = resp.json()
     candidates = data.get("candidates", [])
@@ -195,6 +195,18 @@ async def _synthesize_speech(
                     "mimeType", "audio/L16;codec=pcm;rate=24000"
                 )
     return "", ""
+
+
+async def _report_voice_error(ws, exc):
+    status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+    logger.warning("Gemini TTS unavailable: status=%s exception=%s", status, type(exc).__name__)
+    message = (
+        "Gemini voice quota or rate limit reached (429). Check the TTS model quota "
+        "in Google AI Studio for this API key's project. Text questions still work."
+        if status == 429
+        else "Gemini could not generate interviewer audio. Check the voice service configuration."
+    )
+    await ws.send_json({"type": "voice_error", "message": message})
 
 
 @router.websocket("/interview/live")
@@ -277,7 +289,7 @@ async def live_interview_ws(ws: WebSocket):
                     http_client, api_key, greeting_text
                 )
             except Exception as tts_err:
-                logger.warning("Initial Gemini TTS error: %s", tts_err)
+                await _report_voice_error(ws, tts_err)
 
             # Send greeting to client
             await ws.send_json({"type": "status", "status": "connected"})
@@ -384,7 +396,7 @@ async def live_interview_ws(ws: WebSocket):
                                     http_client, api_key, examiner_text
                                 )
                             except Exception as tts_err:
-                                logger.warning("Gemini TTS error: %s", tts_err)
+                                await _report_voice_error(ws, tts_err)
 
                             await ws.send_json(
                                 {

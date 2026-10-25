@@ -328,6 +328,9 @@ export default function VirtualInterview({ token, onEnd }: VirtualInterviewProps
               setStatus('error');
               stopAudio();
               break;
+            case 'voice_error':
+              setError(msg.message);
+              break;
           }
         } catch {
           // ignore
