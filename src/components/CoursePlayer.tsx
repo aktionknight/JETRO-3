@@ -12,6 +12,9 @@ interface CoursePlayerProps {
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`;
 
 export function CoursePlayer({ course, progress, onProgress, onMessage }: CoursePlayerProps) {
+  // Refreshing a signed URL must not reload a recording already being watched.
+  // The parent remounts this player only when the release or recording changes.
+  const [videoUrl] = useState(course.video_url);
   const video = useRef<HTMLVideoElement>(null);
   const session = useRef<string | null>(null);
   const starting = useRef(false);
@@ -126,7 +129,7 @@ export function CoursePlayer({ course, progress, onProgress, onMessage }: Course
       <div className="learning-card-heading"><div><span className="eyebrow">Current course</span><h2>{course.title}</h2></div><span className="learning-badge">{progress.course_completed ? 'Completed' : 'In progress'}</span></div>
       {configured ? <div className="course-video-wrap">
         <video ref={video} controls playsInline preload="metadata" aria-label={`${course.title} course video`}
-          src={course.video_url} onPlay={() => { void start(); }} onTimeUpdate={track}
+          src={videoUrl} onPlay={() => { void start(); }} onTimeUpdate={track}
           onSeeking={seek} onPause={persist} onEnded={finish}
           onLoadedMetadata={() => { if (video.current && progressRef.current.watched_seconds > 0) video.current.currentTime = progressRef.current.watched_seconds; }}
           onRateChange={() => { if (video.current) video.current.playbackRate = 1; }}

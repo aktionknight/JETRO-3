@@ -132,6 +132,8 @@ def progress(row, settings):
             else None,
             "answers": source["answers"],
             "result": source.get("result"),
+            "transcript": source.get("transcript", []),
+            "duration_seconds": source.get("duration_seconds"),
         }
     return {
         "course_id": "ball-bearing",
@@ -144,6 +146,33 @@ def progress(row, settings):
         "manual_completion": row.manual_completion,
         "playground_result": row.playground,
         "interview": interview,
+        "evaluation": final_evaluation(row),
+    }
+
+
+def final_evaluation(row):
+    playground = row.playground
+    interview = row.interview or {}
+    result = interview.get("result") or {}
+    scores = list(playground["scores"].values()) if playground else []
+    playground_score = sum(scores) / len(scores) if scores else None
+    available = result.get("available_points", 0)
+    interview_score = (
+        100 * result["explanation_points"] / available
+        if interview.get("status") == "completed" and available > 0
+        else None
+    )
+    overall = (
+        (playground_score + interview_score) / 2
+        if (playground_score is not None and interview_score is not None)
+        else None
+    )
+    return {
+        "playground_score": round(playground_score, 1) if playground_score is not None else None,
+        "interview_score": round(interview_score, 1) if interview_score is not None else None,
+        "overall_score": round(overall, 1) if overall is not None else None,
+        "weighting": "50% playground average + 50% interview",
+        "critical_playground_error": bool(playground and playground["critical_error"]),
     }
 
 
@@ -306,6 +335,10 @@ def complete(session, row, stage, settings):
     if stage == "playground" and not progress(row, settings)["course_completed"]:
         raise AppError(
             "COURSE_INCOMPLETE", "Complete the course section before the playground.", 409
+        )
+    if stage == "interview" and not progress(row, settings)["interview_unlocked"]:
+        raise AppError(
+            "PLAYGROUND_INCOMPLETE", "Complete the playground before the interview.", 409
         )
     if stage not in row.manual_completion:
         now = utcnow()

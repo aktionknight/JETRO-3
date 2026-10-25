@@ -15,14 +15,27 @@ export function createLearningReport(course: LearningCourse, progress: LearningP
       ...Object.entries(progress.playground_result.scores).map(([label, score]) => `${label}: ${score}/100`), '');
   }
   if (interview) {
-    rows.push('## Structured viva', '', `Status: ${interview.status}`, `Source release: ${interview.source_release_id ?? course.release_id}`,
+    rows.push('## Interview', '', `Status: ${interview.status}`, `Source release: ${interview.source_release_id ?? course.release_id}`,
       `Script fingerprint: ${interview.script_hash ?? 'Unavailable'}`, `Preparation: ${interview.generation_method ?? 'Structured templates'}`, '');
     if (interview.result) rows.push(`Assessment: ${interview.result.explanation_points}/${interview.result.available_points}`, interview.result.notice, '');
+    if (interview.result?.summary) rows.push(interview.result.summary, '');
     interview.answers.forEach((answer, index) => rows.push(`### Question ${index + 1}`, '',
       answer.question_prompt ?? answer.question_id, `Selected response: ${answer.selected_answer ?? answer.option_id}`,
       `Points: ${answer.points}`, `Feedback: ${answer.feedback}`,
       ...(answer.reflection ? [`Learner reflection (ungraded): ${answer.reflection}`] : []),
       `Evidence: ${answer.evidence_ids.join(', ') || 'No linked source'}`, ''));
+    if (!interview.answers.length) interview.transcript?.forEach((turn, index) => rows.push(
+      `### Unscored response ${index + 1}`, '', turn.question, turn.answer, '',
+    ));
+  }
+  if (progress.evaluation) {
+    const score = (value: number | null) => value === null ? 'Not assessed' : `${value}/100`;
+    const evaluation = progress.evaluation;
+    rows.push('## Combined evaluation', '',
+      `Playground: ${score(evaluation.playground_score)}`,
+      `Interview: ${score(evaluation.interview_score)}`,
+      `Overall: ${score(evaluation.overall_score)}`, `Weighting: ${evaluation.weighting}`,
+      ...(evaluation.critical_playground_error ? ['Critical playground error: instructor review required.'] : []), '');
   }
   rows.push('## Approved source evidence', '');
   course.evidence_items?.forEach(item => rows.push(`- ${item.id} — ${item.author} (${item.source_label}): ${item.content ?? 'Recording segment'}`));

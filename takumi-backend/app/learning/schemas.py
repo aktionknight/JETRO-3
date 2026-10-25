@@ -26,4 +26,4 @@ class Answer(Input):
 
 
 class Completion(Input):
-    stage: Literal["course", "playground"]
+    stage: Literal["course", "playground", "interview"]

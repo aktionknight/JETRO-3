@@ -25,6 +25,7 @@ export interface InterviewQuestion {
   options: { id: string; label: string }[];
 }
 export interface LearningProgress {
+  evaluation?: { playground_score: number | null; interview_score: number | null; overall_score: number | null; weighting: string; critical_playground_error: boolean };
   course_id: string;
   release_id: string | null;
   watched_seconds: number;
@@ -43,9 +44,11 @@ export interface LearningProgress {
     source_content_hash?: string;
     script_hash?: string;
     generation_method?: string;
+    transcript?: { question: string; answer: string }[];
+    duration_seconds?: number | null;
     current_question: InterviewQuestion | null;
     answers: { question_id: string; option_id: string; question_prompt?: string; selected_answer?: string; reflection: string; feedback: string; points: number; evidence_ids: string[] }[];
-    result: { explanation_points: number; available_points: number; recognition_of_limits: number; critical_playground_error: boolean; playground_assessed?: boolean; notice: string } | null;
+    result: { explanation_points: number; available_points: number; recognition_of_limits: number; critical_playground_error: boolean; playground_assessed?: boolean; notice: string; summary?: string; assessment_status?: string } | null;
   } | null;
 }
 export interface PlaybackSession { session_id: string; position_seconds: number; progress: LearningProgress }
@@ -125,5 +128,9 @@ export const learningApi = {
   startInterview: () => request<LearningProgress>('/interview', {}),
   answerInterview: (answer: InterviewAnswer) => request<LearningProgress>('/interview/answers', answer),
   resetKnowledge: () => request<LearningProgress>('/reset', {}),
+  getToken: async (): Promise<string> => {
+    const auth = await authenticate();
+    return auth.access_token;
+  },
 };
 

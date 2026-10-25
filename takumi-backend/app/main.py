@@ -23,6 +23,7 @@ from app.config import Settings, get_settings
 from app.core.errors import register_error_handlers
 from app.core.logging import add_http_middlewares, configure_logging
 from app.database import build_engine, init_db
+from app.learning import live_interview
 from app.learning import router as learning
 from app.services.seed_service import seed_demo
 
@@ -75,6 +76,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         media,
         demo,
         learning,
+        live_interview,
         studio,
         studio_analysis,
     ):

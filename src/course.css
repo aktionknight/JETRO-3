@@ -9,7 +9,14 @@
 .learning-shell textarea:focus-visible,.learning-shell input:focus-visible{outline:2px solid #769462;outline-offset:2px}
 .learning-action-count { padding-left: 10px; margin-left: auto; border-left: 1px solid var(--learning-line); white-space: nowrap; }
 .learning-section-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;border:1px solid var(--learning-line);background:var(--learning-surface);border-radius:6px;padding:4px 12px;min-height:30px;flex-shrink:0}.learning-section-toolbar>span{font-size:11px;font-weight:600;color:#647068}.learning-section-toolbar>div{display:flex;gap:8px}.learning-button-secondary{background:#f6f8f2;color:#4c6545;border:1px solid #ced9c5;border-radius:4px;padding:3px 9px;font-size:10.5px!important;min-height:24px;display:inline-flex;align-items:center;gap:6px}.learning-button-secondary:hover:not(:disabled){background:#eaf0e3}.learning-manual-label{font-size:10.5px;font-weight:550;color:#64755c}.learning-no-result .learning-text-button{padding-top:4px}.learning-manual-evidence{padding:12px 0;border-top:1px solid #e0e6d9}.learning-embedded-workspace{display:flex;flex-direction:column}.learning-embedded-workspace>.learning-section-toolbar{margin:4px 18px 0}.learning-embedded-workspace>.app-shell{height:auto;flex:1;min-height:0}
-.learning-error-banner{background:#fdf2f0;border:1px solid #f1c5c0;color:#9b3d30;border-radius:6px;padding:8px 12px;font-size:11px;display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.learning-notification{position:fixed;right:20px;bottom:70px;z-index:150;display:flex;align-items:flex-start;gap:9px;width:max-content;max-width:min(360px,calc(100vw - 32px));box-sizing:border-box;padding:12px 14px;border:1px solid #cbd9c2;border-radius:9px;background:#f6faf2;color:#455a3a;box-shadow:0 4px 20px #26351e18;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.learning-notification.is-error{background:#fff7f5;border-color:#ecc4bf;color:#a13a30}
+.learning-notification>svg{flex-shrink:0;margin-top:2px}
+.learning-notification>span{min-width:0}
+.learning-notification>button{flex-shrink:0;border:0;background:transparent;color:inherit;cursor:pointer;font-size:18px;line-height:20px;padding:0 2px}
+.learning-status>div:first-child{min-width:0;flex:1;overflow:hidden}
+.learning-status-message{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:760px){.learning-notification{right:16px;bottom:100px}}
 @media(max-width:760px){.learning-section-toolbar{align-items:flex-start;flex-wrap:wrap}.learning-section-toolbar>div{flex-wrap:wrap}.learning-embedded-workspace>.learning-section-toolbar{margin:6px 12px 0}}
 
 @media(min-width:761px){.learning-dashboard{height:calc(100% - 66px);min-height:490px;grid-template-rows:minmax(290px,1.7fr) minmax(180px,1fr)}.learning-current-course,.learning-path{padding:18px 21px}.learning-current-course{display:flex;flex-direction:column}.learning-current-course .learning-panel-heading{margin-bottom:11px}.learning-course-hero{min-height:0;flex:1}.learning-course-hero h2{font-size:26px;margin-bottom:9px}.learning-course-hero p{font-size:11px;margin-bottom:10px;line-height:1.6}.learning-course-meta{margin-bottom:13px;font-size:9px;gap:10px}.learning-current-course .learning-progress-summary{margin-top:12px;padding-top:12px}.learning-path .learning-panel-heading{margin-bottom:12px}.learning-stage{min-height:64px;padding:12px;margin-bottom:9px}.learning-objectives,.learning-record-card{padding:18px 21px}.learning-objectives .learning-panel-heading,.learning-record-card .learning-panel-heading{margin-bottom:13px}.learning-record-card .learning-no-result{min-height:90px}.learning-record-card .learning-score-grid{margin:8px 0}.learning-record-card .learning-score-grid strong{font-size:21px}.learning-record-card p{font-size:10px}.learning-course-hero .learning-bearing-illustration{transform:none}}
@@ -212,3 +219,124 @@
 .learning-script-source{margin:12px 0;padding:12px;border:1px solid #dce0da;border-radius:6px;font-size:12px;color:#56604f}.learning-script-source summary{cursor:pointer;font-weight:600}.learning-script-source p{white-space:pre-wrap;max-height:180px;overflow:auto;line-height:1.6}.learning-question h2{white-space:pre-line}
 .learning-refresh-btn{display:flex;align-items:center;justify-content:center;padding:7px;color:#596a5d;background:transparent;border:1px solid #dce0da;border-radius:5px;cursor:pointer}.learning-refresh-btn:hover{background:#ecefe9}
 .learning-approved-evidence{margin:18px 0;padding:12px;border:1px solid #dce0da;border-radius:6px;font-size:12px}.learning-approved-evidence summary{cursor:pointer;font-weight:600}.learning-approved-evidence article{padding:12px 0;border-bottom:1px solid #dfe4da}.learning-approved-evidence p{white-space:pre-wrap}.learning-answer-review article small{color:#6f796d;overflow-wrap:anywhere}
+.learning-final-evaluation{grid-column:1/-1;margin-top:18px}
+.learning-final-scores{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0}
+.learning-final-scores>div{padding:16px;border:1px solid #dce4d6;border-radius:8px;display:flex;flex-direction:column;gap:8px}
+.learning-final-scores span{font-size:12px;color:#647068}
+.learning-final-scores strong{font-size:22px;color:#45573c}
+.learning-final-evaluation>p{font-size:12px;line-height:1.6}
+.learning-evaluation-review{color:#a13a30!important}
+.learning-final-evaluation .learning-answer-review{margin-top:18px;font-size:12px}
+.learning-final-evaluation summary{cursor:pointer;font-weight:600}
+@media(max-width:600px){.learning-final-scores{grid-template-columns:1fr}.learning-final-evaluation .learning-panel-heading{align-items:flex-start;gap:12px;flex-wrap:wrap}}
+
+/* ── Interview Choice Cards (Takumi Theme) ── */
+.interview-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+  width: 100%;
+}
+
+.interview-choice-card {
+  display: flex;
+  flex-direction: column;
+  background: #f8f9f5;
+  border: 1px solid #dfe4da;
+  border-radius: 8px;
+  padding: 18px;
+  text-align: left;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.interview-choice-card:hover {
+  border-color: #355c48;
+  background: #ffffff;
+  box-shadow: 0 4px 14px rgba(53, 92, 72, 0.08);
+  transform: translateY(-2px);
+}
+
+.interview-choice-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.interview-choice-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  background: #edf2e7;
+  color: #355c48;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #dce5d5;
+}
+
+.interview-choice-card h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--learning-ink, #28322e);
+  margin: 0 0 6px;
+}
+
+.interview-choice-card p {
+  font-size: 11.5px;
+  color: var(--learning-muted, #737b76);
+  line-height: 1.55;
+  margin: 0 0 16px;
+  flex: 1;
+}
+
+.interview-choice-card .learning-button {
+  margin-top: auto;
+  width: 100%;
+  justify-content: center;
+}
+
+/* ── Bottom Bar Jetro Branding ── */
+.learning-status {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+  padding: 6px 20px !important;
+  min-height: 42px;
+}
+
+.learning-status-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.learning-status-brand {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 14px;
+  border-left: 1px solid #d7dfcf;
+}
+
+.learning-status-jetro-logo {
+  height: 22px;
+  width: auto;
+  max-width: 80px;
+  display: block;
+  object-fit: contain;
+  opacity: 0.9;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.learning-status-jetro-logo:hover {
+  opacity: 1;
+  transform: scale(1.04);
+}
