@@ -93,21 +93,17 @@ def test_question_and_followup_limits_complete_automatically(client):
 
 def test_voice_semantic_event_replay_creates_one_answer(client):
     from app import service
-    from app.models import VivaSession
-    database=client.app.state.db
-    session=start(client,mode='voice').json()
-    with database.session_factory.begin() as db:
-        row=db.get(VivaSession,session['id']);row.status='connecting';row.connection_epoch=1
-    service.voice_ready(database,session['id'],'learner-1',1,'fake-call')
-    service.mark_question_delivered(database,session['id'],'learner-1',1)
-    first=service.commit_voice_turn(database,session['id'],'learner-1',1,'provider-item','I gathered observations before choosing a check.')
-    replay=service.commit_voice_turn(database,session['id'],'learner-1',1,'provider-item','I gathered observations before choosing a check.')
+    database,sid=setup_live_voice_session(client)
+    service.voice_input_started(database,sid,'learner-1',1,'provider-item')
+    first=service.commit_voice_turn(database,sid,'learner-1',1,'provider-item','I gathered observations before choosing a check.')
+    replay=service.commit_voice_turn(database,sid,'learner-1',1,'provider-item','I gathered observations before choosing a check.')
     assert replay==first
-    restored=client.get('/api/v1/viva/sessions/'+session['id'],headers=headers()).json()
+    restored=client.get('/api/v1/viva/sessions/'+sid,headers=headers()).json()
     assert len([t for t in restored['transcript'] if t['speaker']=='learner'])==1
     with pytest.raises(service.DomainError) as error:
-        service.commit_voice_turn(database,session['id'],'learner-1',1,'provider-item','A changed transcript must not replace committed input silently.')
+        service.commit_voice_turn(database,sid,'learner-1',1,'provider-item','A changed transcript must not replace committed input silently.')
     assert error.value.status==409
+    assert error.value.code=='turn_conflict'
 
 def test_flagged_turn_keeps_original_and_links_replacement(client):
     session=start(client).json();base='/api/v1/viva/sessions/'+session['id']
@@ -231,6 +227,7 @@ def test_late_delivery_ack_does_not_mark_new_question_delivered(client):
     with database.session_factory() as db:
         original=db.scalar(select(InterviewTurn).where(InterviewTurn.session_id==sid,InterviewTurn.speaker=='interviewer'))
         original_id=original.id
+    service.voice_input_started(database,sid,'learner-1',1,'answer-item')
     result=service.commit_voice_turn(database,sid,'learner-1',1,'answer-item','My observed evidence supports the check.')
     follow_up=result['session']['current_question']
     assert follow_up['is_follow_up']
@@ -269,3 +266,212 @@ def test_pausing_pending_speech_records_interrupted_turn(client):
     restored=client.get('/api/v1/viva/sessions/'+sid,headers=headers()).json()
     assert restored['status']=='paused'
     assert any(t['speaker']=='learner' and t['delivery']=='interrupted' for t in restored['transcript'])
+
+
+def test_overlapping_voice_items_cannot_answer_follow_up(client,monkeypatch):
+    from app import service, provider
+    from app.models import VivaSession, VoiceConnection, ProviderReceipt
+    from sqlalchemy import select
+    database,sid=setup_live_voice_session(client)
+    first=service.voice_input_started(database,sid,'learner-1',1,'A')
+    assert service.voice_input_started(database,sid,'learner-1',1,'B')['id']=='A'
+    with database.session_factory() as db:
+        question=db.get(VivaSession,sid).current_question['id']
+        connection=db.scalar(select(VoiceConnection).where(VoiceConnection.session_id==sid))
+        assert connection.pending_question_id==question
+        assert connection.pending_utterance_id==first['id']
+        receipts=list(db.scalars(select(ProviderReceipt).where(ProviderReceipt.session_id==sid)))
+        assert {(r.event_id,r.semantic_key) for r in receipts}=={('A','A'),('B','B')}
+    result=service.commit_voice_turn(database,sid,'learner-1',1,'A','My observed evidence supports the check.')
+    assert result['turn']['question_id']==question
+    assert result['session']['current_question']['is_follow_up']
+    before=client.get('/api/v1/viva/sessions/'+sid,headers=headers()).json()
+    with database.session_factory() as db:
+        coverage=db.get(VivaSession,sid).coverage
+    def no_planning(context):
+        pytest.fail('Rejected overlap must not call provider')
+    monkeypatch.setattr(provider,'plan_follow_up',no_planning)
+    with pytest.raises(service.DomainError) as error:
+        service.commit_voice_turn(database,sid,'learner-1',1,'B','A late second answer.')
+    assert error.value.code=='utterance_not_accepted'
+    assert error.value.status==409
+    assert service.voice_input_started(database,sid,'learner-1',1,'B')['pending'] is False
+    assert service.voice_input_started(database,sid,'learner-1',1,'A')['pending'] is False
+    after=client.get('/api/v1/viva/sessions/'+sid,headers=headers()).json()
+    for field in ('revision','transcript','answered_count','follow_up_count','current_question'):
+        assert after[field]==before[field]
+    with database.session_factory() as db:
+        assert db.get(VivaSession,sid).coverage==coverage
+        connection=db.scalar(select(VoiceConnection).where(VoiceConnection.session_id==sid))
+        assert connection.pending_utterance_id is None
+        assert connection.pending_question_id is None
+        assert connection.pending_since is None
+
+
+def test_unstarted_voice_finalization_never_calls_provider(client,monkeypatch):
+    from app import service, provider
+    database,sid=setup_live_voice_session(client)
+    before=client.get('/api/v1/viva/sessions/'+sid,headers=headers()).json()
+    monkeypatch.setattr(provider,'plan_follow_up',lambda context:pytest.fail('Unstarted input reached provider'))
+    with pytest.raises(service.DomainError) as error:
+        service.commit_voice_turn(database,sid,'learner-1',1,'never-started','Unaccepted answer.')
+    assert error.value.code=='utterance_not_accepted'
+    after=client.get('/api/v1/viva/sessions/'+sid,headers=headers()).json()
+    assert after['transcript']==before['transcript']
+    assert after['revision']==before['revision']
+    assert service.commit_voice_turn(database,sid,'learner-1',1,'never-started','  ') is None
+
+
+def test_rejected_overlap_finalization_preserves_pending_owner_and_deadline(client,monkeypatch):
+    from app import service, provider
+    from app.models import VoiceConnection
+    from sqlalchemy import select
+    database,sid=setup_live_voice_session(client)
+    service.voice_input_started(database,sid,'learner-1',1,'A')
+    service.voice_input_started(database,sid,'learner-1',1,'B')
+    service.pending_voice_input(database,sid,'learner-1',True)
+    with database.session_factory() as db:
+        connection=db.scalar(select(VoiceConnection).where(VoiceConnection.session_id==sid))
+        captured=(connection.pending_question_id,connection.pending_since,connection.drain_started_at)
+    monkeypatch.setattr(provider,'plan_follow_up',lambda context:pytest.fail('Rejected B reached provider'))
+    with pytest.raises(service.DomainError) as error:
+        service.commit_voice_turn(database,sid,'learner-1',1,'B','B finalized first.')
+    assert error.value.code=='utterance_not_accepted'
+    assert service.voice_input_finished(database,sid,'learner-1',1,'B') is False
+    assert service.voice_input_finished(database,sid,'learner-1',2,'A') is False
+    assert service.voice_input_started(database,sid,'learner-1',1,'A')['id']=='A'
+    with database.session_factory() as db:
+        connection=db.scalar(select(VoiceConnection).where(VoiceConnection.session_id==sid))
+        assert connection.pending_utterance_id=='A'
+        assert (connection.pending_question_id,connection.pending_since,connection.drain_started_at)==captured
+
+
+@pytest.mark.parametrize('change,code',[
+    ('question','utterance_not_accepted'),('epoch','connection_expired'),
+    ('pending','utterance_not_accepted'),('captured_question','utterance_not_accepted'),
+    ('connection','utterance_not_accepted'),('revision','stale_revision'),
+    ('state','invalid_state'),('delivery','question_not_delivered'),
+])
+def test_voice_commit_rechecks_state_after_planning(client,monkeypatch,change,code):
+    from app import service, provider
+    from app.models import VivaSession, VoiceConnection, InterviewTurn
+    from sqlalchemy import select
+    database,sid=setup_live_voice_session(client)
+    service.voice_input_started(database,sid,'learner-1',1,'A')
+    with database.session_factory() as db:
+        before=db.get(VivaSession,sid)
+        coverage=before.coverage
+        turns=service.turns_for(db,sid)
+    def plan(context):
+        with database.session_factory.begin() as db:
+            session=db.get(VivaSession,sid)
+            connection=db.scalar(select(VoiceConnection).where(VoiceConnection.session_id==sid))
+            if change=='question':session.current_question=dict(session.current_question,id='other')
+            elif change=='epoch':session.connection_epoch+=1
+            elif change=='pending':connection.pending_utterance_id='B'
+            elif change=='captured_question':connection.pending_question_id='other'
+            elif change=='connection':connection.status='closed'
+            elif change=='revision':session.revision+=1
+            elif change=='state':session.status='paused'
+            elif change=='delivery':
+                db.scalar(select(InterviewTurn).where(InterviewTurn.session_id==sid)).delivery='unconfirmed'
+        return {'action':'advance','prompt':None}
+    monkeypatch.setattr(provider,'plan_follow_up',plan)
+    with pytest.raises(service.DomainError) as error:
+        service.commit_voice_turn(database,sid,'learner-1',1,'A','An answer accepted before planning.')
+    assert error.value.code==code
+    with database.session_factory() as db:
+        assert db.get(VivaSession,sid).coverage==coverage
+        assert [(t['id'],t['text']) for t in service.turns_for(db,sid)]==[(t['id'],t['text']) for t in turns]
+
+
+@pytest.mark.parametrize('legacy',[False,True])
+def test_interruption_uses_captured_question_not_current_question(client,legacy):
+    from app import service
+    from app.models import VivaSession, VoiceConnection
+    from sqlalchemy import select
+    database,sid=setup_live_voice_session(client)
+    service.voice_input_started(database,sid,'learner-1',1,'A')
+    with database.session_factory.begin() as db:
+        session=db.get(VivaSession,sid)
+        connection=db.scalar(select(VoiceConnection).where(VoiceConnection.session_id==sid))
+        captured=connection.pending_question_id
+        if legacy:connection.pending_question_id=None
+        session.current_question=dict(session.current_question,id='new-question')
+    with pytest.raises(service.DomainError) as error:
+        service.commit_voice_turn(database,sid,'learner-1',1,'A','Must not answer another question.')
+    assert error.value.code=='utterance_not_accepted'
+    with database.session_factory.begin() as db:
+        session=db.get(VivaSession,sid)
+        service.pause(db,session,{'expected_revision':session.revision},database.settings)
+    with database.session_factory() as db:
+        turn=next(t for t in service.turns_for(db,sid) if t['speaker']=='learner')
+        assert turn['delivery']=='interrupted'
+        assert turn['question_id']==(None if legacy else captured)
+        connection=db.scalar(select(VoiceConnection).where(VoiceConnection.session_id==sid))
+        assert connection.pending_utterance_id is None
+        assert connection.pending_question_id is None
+        assert connection.pending_since is None
+
+
+def test_voice_start_without_question_rejects_without_receipt(client):
+    from app import service
+    from app.models import VivaSession, ProviderReceipt
+    from sqlalchemy import select
+    database,sid=setup_live_voice_session(client)
+    with database.session_factory.begin() as db:
+        db.get(VivaSession,sid).current_question=None
+    with pytest.raises(service.DomainError) as error:
+        service.voice_input_started(database,sid,'learner-1',1,'A')
+    assert error.value.code=='question_conflict'
+    with database.session_factory() as db:
+        assert db.scalar(select(ProviderReceipt).where(ProviderReceipt.session_id==sid)) is None
+
+
+@pytest.mark.parametrize('client_id,question_id',[
+    ('voice:1:B',None),('voice:2:A',None),('voice:1:A','wrong-question'),
+])
+def test_voice_grace_does_not_cover_another_item_or_question(client,client_id,question_id):
+    from datetime import timedelta
+    from app import service
+    from app.models import VivaSession, VoiceConnection, now
+    from sqlalchemy import select
+    database,sid=setup_live_voice_session(client)
+    service.voice_input_started(database,sid,'learner-1',1,'A')
+    service.pending_voice_input(database,sid,'learner-1',True)
+    with database.session_factory.begin() as db:
+        session=db.get(VivaSession,sid)
+        session.active_since=now()-timedelta(seconds=601)
+    with pytest.raises(service.DomainError) as error:
+        with database.session_factory.begin() as db:
+            session=db.get(VivaSession,sid)
+            payload={'expected_revision':session.revision,'question_id':question_id or session.current_question['id'],
+                'client_turn_id':client_id,'text':'Cannot borrow another utterance grace.'}
+            service.accept_answer(db,session,payload,database.settings,{'action':'advance'},'voice')
+    assert error.value.code=='time_limit'
+    with database.session_factory() as db:
+        connection=db.scalar(select(VoiceConnection).where(VoiceConnection.session_id==sid))
+        assert connection.pending_utterance_id=='A'
+        assert connection.pending_question_id==db.get(VivaSession,sid).current_question['id']
+
+
+def test_matching_voice_acceptance_clears_owner_but_preserves_drain(client):
+    from app import service
+    from app.models import VoiceConnection
+    from sqlalchemy import select
+    database,sid=setup_live_voice_session(client)
+    service.voice_input_started(database,sid,'learner-1',1,'A')
+    service.pending_voice_input(database,sid,'learner-1',True)
+    with database.session_factory() as db:
+        connection=db.scalar(select(VoiceConnection).where(VoiceConnection.session_id==sid))
+        deadline=connection.drain_started_at
+        question=connection.pending_question_id
+    result=service.commit_voice_turn(database,sid,'learner-1',1,'A','My observations support the check.')
+    assert result['turn']['question_id']==question
+    with database.session_factory() as db:
+        connection=db.scalar(select(VoiceConnection).where(VoiceConnection.session_id==sid))
+        assert connection.pending_utterance_id is None
+        assert connection.pending_question_id is None
+        assert connection.pending_since is None
+        assert connection.drain_started_at==deadline
+    assert service.voice_input_finished(database,sid,'learner-1',1,'A') is False

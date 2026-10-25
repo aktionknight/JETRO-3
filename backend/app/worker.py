@@ -26,7 +26,7 @@ def process_once(database):
         job_id=candidate.id
         # The claim token (lease timestamp) prevents a stale worker from publishing.
         lease=instant+timedelta(seconds=120)
-        claimed=db.execute(update(EvaluationJob).where(EvaluationJob.id==job_id,eligible).values(status='running',lease_until=lease,attempt_count=EvaluationJob.attempt_count+1))
+        claimed=db.execute(update(EvaluationJob).where(EvaluationJob.id==job_id,eligible).values(status='running',lease_until=lease,attempt_count=EvaluationJob.attempt_count+1).execution_options(synchronize_session=False))
         if claimed.rowcount!=1:return False
         db.flush();db.expire_all()
         candidate=db.get(EvaluationJob,job_id)

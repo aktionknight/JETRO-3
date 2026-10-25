@@ -25,6 +25,7 @@ function courseRecordingIdentity(value: string) {
   } catch { return value; }
 }
 
+// Only same-origin media streams ignore rotating playback tokens.
 function courseRecordingKey(value: string) {
   const recording = courseRecordingIdentity(value);
   let hash = 0;
@@ -199,7 +200,7 @@ export default function CourseHub() {
 
   return <div className="learning-shell">
     {notification && <div className={`learning-notification${notification.isError ? ' is-error' : ''}`} role={notification.isError ? 'alert' : 'status'}>
-      {notification.isError ? <AlertCircle size={16}/> : <Check size={16}/>}
+      {notification.isError ? <AlertCircle size={16} /> : <Check size={16} />}
       <span>{notification.text}</span>
       <button type="button" aria-label="Dismiss notification" onClick={() => setNotification(null)}>×</button>
     </div>}
@@ -207,7 +208,7 @@ export default function CourseHub() {
       <a className="learning-brand" href="#" onClick={event => { event.preventDefault(); setTab('dashboard'); }} aria-label="Takumi learning dashboard">
         <img src={takumiLogo} alt="Takumi" className="learning-brand-logo" />
       </a>
-      <nav className="learning-tabs" aria-label="Course modules">{tabs.map(({ id, label, icon: Icon }) => <button key={id} type="button" className={tab === id ? 'is-active' : ''} aria-current={tab === id ? 'page' : undefined} disabled={locked(id) || loading || !progress} title={locked(id) ? id === 'playground' ? 'Complete the course content to unlock' : 'Complete the playground to unlock' : label} onClick={() => setTab(id)}><Icon size={15}/><span>{label}</span>{locked(id) && <LockKeyhole size={12}/>}</button>)}</nav>
+      <nav className="learning-tabs" aria-label="Course modules">{tabs.map(({ id, label, icon: Icon }) => <button key={id} type="button" className={tab === id ? 'is-active' : ''} aria-current={tab === id ? 'page' : undefined} disabled={locked(id) || loading || !progress} title={locked(id) ? id === 'playground' ? 'Complete the course content to unlock' : 'Complete the playground to unlock' : label} onClick={() => setTab(id)}><Icon size={15} /><span>{label}</span>{locked(id) && <LockKeyhole size={12} />}</button>)}</nav>
       <div className="learning-header-user">
         <button
           type="button"
@@ -220,26 +221,26 @@ export default function CourseHub() {
           <RotateCcw size={13} />
           <span>Reset knowledge</span>
         </button>
-        <button className="learning-refresh-btn" type="button" aria-label="Check for course updates" title="Check for course updates" disabled={loading || busy} onClick={() => void checkCourseUpdates()}><RefreshCw size={14}/></button>
+        <button className="learning-refresh-btn" type="button" aria-label="Check for course updates" title="Check for course updates" disabled={loading || busy} onClick={() => void checkCourseUpdates()}><RefreshCw size={14} /></button>
         <a className="learning-studio-link" href="/studio">Expert Studio</a>
         <span className="learning-profile"><span>AP</span>Apprentice</span>
       </div>
     </header>
     <main className={`learning-main ${tab === 'playground' ? 'learning-main-playground' : ''}`}>
-      {loading || !course || !progress ? <section className="learning-empty"><BookOpen size={30}/><h1>{loading ? 'Opening your course' : 'Learning service unavailable'}</h1><p>{loading ? 'Loading your current course and saved progress.' : 'Connect the learning backend to load your course and continue from your saved stage.'}</p>{!loading && <button className="learning-button" onClick={() => void initialize()}><RefreshCw size={15}/>Reconnect</button>}</section> : <>
-        {tab !== 'playground' && <div className="learning-page-heading"><div><div className="learning-eyebrow">APPRENTICE LEARNING / BEARING ASSEMBLY</div><h1>{tab === 'dashboard' ? 'Your learning workspace' : tab === 'course' ? 'Course content' : 'Virtual interview'}</h1></div><div className="learning-heading-actions">{tab === 'dashboard' && <button type="button" className="learning-button-secondary learning-reset-page-btn" aria-label="Reset student knowledge" onClick={() => setShowResetConfirm(true)} disabled={busy || loading}><RotateCcw size={13} /><span>Reset student knowledge</span></button>}<span className="learning-record"><span className="learning-live-dot"/>Progress saved to your course record</span></div></div>}
+      {loading || !course || !progress ? <section className="learning-empty"><BookOpen size={30} /><h1>{loading ? 'Opening your course' : 'Learning service unavailable'}</h1><p>{loading ? 'Loading your current course and saved progress.' : 'Connect the learning backend to load your course and continue from your saved stage.'}</p>{!loading && <button className="learning-button" onClick={() => void initialize()}><RefreshCw size={15} />Reconnect</button>}</section> : <>
+        {tab !== 'playground' && <div className="learning-page-heading"><div><div className="learning-eyebrow">APPRENTICE LEARNING / BEARING ASSEMBLY</div><h1>{tab === 'dashboard' ? 'Your learning workspace' : tab === 'course' ? 'Course content' : 'Virtual interview'}</h1></div><div className="learning-heading-actions">{tab === 'dashboard' && <button type="button" className="learning-button-secondary learning-reset-page-btn" aria-label="Reset student knowledge" onClick={() => setShowResetConfirm(true)} disabled={busy || loading}><RotateCcw size={13} /><span>Reset student knowledge</span></button>}<span className="learning-record"><span className="learning-live-dot" />Progress saved to your course record</span></div></div>}
         {tab === 'dashboard' && <div className="learning-dashboard">
           <section className="learning-panel learning-current-course">
             <div className="learning-panel-heading"><span className="learning-eyebrow">CURRENT COURSE</span><span className="learning-tag">Foundation</span></div>
-            <div className="learning-course-hero"><div><h2>{course.title}</h2><p>{course.description}</p><div className="learning-course-meta"><span><Box size={14}/> {course.equipment}</span><span><BookOpen size={14}/> 3 sequential stages</span></div><button className="learning-button" onClick={goNext}>{completed === 3 ? 'View evaluation' : completed ? 'Continue learning' : 'Open course'}<ArrowRight size={15}/></button></div><div className="learning-bearing-illustration" aria-hidden="true"><div className="learning-bearing-ring">{Array.from({ length: 8 }, (_, i) => <i key={i} style={{ transform: `rotate(${i * 45}deg) translateY(-51px)` }}/>) }<span/></div><small>BALL BEARING · ASSEMBLY</small></div></div>
-            <div className="learning-progress-summary"><div><strong>{completed} of 3 stages complete</strong><span>{Math.round(completed / 3 * 100)}%</span></div><progress max={3} value={completed} aria-label="Course stages completed"/></div>
+            <div className="learning-course-hero"><div><h2>{course.title}</h2><p>{course.description}</p><div className="learning-course-meta"><span><Box size={14} /> {course.equipment}</span><span><BookOpen size={14} /> 3 sequential stages</span></div><button className="learning-button" onClick={goNext}>{completed === 3 ? 'View evaluation' : completed ? 'Continue learning' : 'Open course'}<ArrowRight size={15} /></button></div><div className="learning-bearing-illustration" aria-hidden="true"><div className="learning-bearing-ring">{Array.from({ length: 8 }, (_, i) => <i key={i} style={{ transform: `rotate(${i * 45}deg) translateY(-51px)` }} />)}<span /></div><small>BALL BEARING · ASSEMBLY</small></div></div>
+            <div className="learning-progress-summary"><div><strong>{completed} of 3 stages complete</strong><span>{Math.round(completed / 3 * 100)}%</span></div><progress max={3} value={completed} aria-label="Course stages completed" /></div>
           </section>
-          <section className="learning-panel learning-path"><div className="learning-panel-heading"><h2>Learning sequence</h2><span className="learning-subtle">In order</span></div>{tabs.slice(1).map(({ id, label, icon: Icon }, index) => <button className="learning-stage" key={id} disabled={locked(id)} onClick={() => setTab(id)}><span className={`learning-stage-number ${completed > index ? 'is-complete' : ''}`}>{completed > index ? <Check size={15}/> : `0${index + 1}`}</span><span><strong>{label}</strong><small>{stageStatus(index)}</small></span>{locked(id) ? <LockKeyhole size={15}/> : <ChevronRight size={16}/>}</button>)}</section>
-          <section className="learning-panel learning-objectives"><div className="learning-panel-heading"><h2>What you will practice</h2><ClipboardCheck size={17}/></div><div className="learning-objective-grid"><div><span>01</span><h3>Inspect & prepare</h3><p>Identify the components and record observations before assembly.</p></div><div><span>02</span><h3>Assemble & verify</h3><p>Follow the guided sequence and check the supplied evidence.</p></div><div><span>03</span><h3>Explain your judgment</h3><p>Support a release or escalation decision in the final interview.</p></div></div></section>
-          <section className="learning-panel learning-record-card"><div className="learning-panel-heading"><h2>Latest assessment</h2><ClipboardCheck size={17}/></div>{progress.playground_result ? <><div className="learning-score-grid">{Object.entries(progress.playground_result.scores).map(([label, value]) => <div key={label}><strong>{value}<small>/100</small></strong><span>{label}</span></div>)}</div><p>{interview?.status === 'completed' ? 'Virtual interview completed. Open the interview tab to review your evaluation.' : 'Playground result recorded. Continue to the interview to explain your decisions.'}</p><button className="learning-text-button" onClick={() => setTab('interview')}>Open interview <ArrowRight size={14}/></button></> : <div className="learning-no-result"><ClipboardCheck size={23}/>{progress.manual_completion?.playground ? <div><strong className="learning-manual-label">Manually completed</strong><p>No simulation score was recorded.</p><button className="learning-text-button" onClick={() => setTab('interview')}>{interview?.status === 'completed' ? 'View evaluation' : 'Continue to interview'}<ArrowRight size={14}/></button></div> : <p>Your playground scores and final evaluation will appear here.</p>}</div>}</section>
+          <section className="learning-panel learning-path"><div className="learning-panel-heading"><h2>Learning sequence</h2><span className="learning-subtle">In order</span></div>{tabs.slice(1).map(({ id, label, icon: Icon }, index) => <button className="learning-stage" key={id} disabled={locked(id)} onClick={() => setTab(id)}><span className={`learning-stage-number ${completed > index ? 'is-complete' : ''}`}>{completed > index ? <Check size={15} /> : `0${index + 1}`}</span><span><strong>{label}</strong><small>{stageStatus(index)}</small></span>{locked(id) ? <LockKeyhole size={15} /> : <ChevronRight size={16} />}</button>)}</section>
+          <section className="learning-panel learning-objectives"><div className="learning-panel-heading"><h2>What you will practice</h2><ClipboardCheck size={17} /></div><div className="learning-objective-grid"><div><span>01</span><h3>Inspect & prepare</h3><p>Identify the components and record observations before assembly.</p></div><div><span>02</span><h3>Assemble & verify</h3><p>Follow the guided sequence and check the supplied evidence.</p></div><div><span>03</span><h3>Explain your judgment</h3><p>Support a release or escalation decision in the final interview.</p></div></div></section>
+          <section className="learning-panel learning-record-card"><div className="learning-panel-heading"><h2>Latest assessment</h2><ClipboardCheck size={17} /></div>{progress.playground_result ? <><div className="learning-score-grid">{Object.entries(progress.playground_result.scores).map(([label, value]) => <div key={label}><strong>{value}<small>/100</small></strong><span>{label}</span></div>)}</div><p>{interview?.status === 'completed' ? 'Virtual interview completed. Open the interview tab to review your evaluation.' : 'Playground result recorded. Continue to the interview to explain your decisions.'}</p><button className="learning-text-button" onClick={() => setTab('interview')}>Open interview <ArrowRight size={14} /></button></> : <div className="learning-no-result"><ClipboardCheck size={23} />{progress.manual_completion?.playground ? <div><strong className="learning-manual-label">Manually completed</strong><p>No simulation score was recorded.</p><button className="learning-text-button" onClick={() => setTab('interview')}>{interview?.status === 'completed' ? 'View evaluation' : 'Continue to interview'}<ArrowRight size={14} /></button></div> : <p>Your playground scores and final evaluation will appear here.</p>}</div>}</section>
         </div>}
-        {tab === 'course' && <div className="learning-course-layout"><section className="learning-player-panel"><div className="learning-section-toolbar"><span>{progress.manual_completion?.course ? 'Manually completed' : progress.course_completed ? 'Course viewing complete' : 'Course section'}</span><div>{!progress.course_completed && <button className="learning-button learning-button-secondary" disabled={busy || !course.release_id} title={!course.release_id ? 'Publish a reviewed course release in Expert Studio before completing training' : undefined} onClick={() => void completeSection('course')}>Mark section complete<Check size={15}/></button>}{progress.playground_unlocked && <button className="learning-button" onClick={() => setTab('playground')}>Continue to playground<ArrowRight size={15}/></button>}</div></div><CoursePlayer key={`${course.release_id}:${course.release_content_hash}:${courseRecordingIdentity(course.video_url)}:${course.video_duration_seconds}`} course={course} progress={progress} onProgress={updateProgress} onMessage={setMessage}/></section></div>}
-        {tab === 'playground' && <div className="learning-embedded-workspace"><Playground key={`playground-${resetEpoch}`} persistenceKey={`takumi-course-attempt:${course.release_id}:${course.release_content_hash ?? ''}:${courseRecordingKey(course.video_url ?? '')}:${course.video_duration_seconds}`} embedded onActivity={setActionCount} onMessage={setMessage} onAttemptComplete={recordAttempt} onContinueToInterview={() => { if (progress.interview_unlocked) setTab('interview'); else setMessage('Complete the playground section before continuing to the interview.'); }} headerAction={<>{!playgroundCompleted && <button type="button" className="learning-button learning-button-secondary header-complete-btn" disabled={busy || !course.release_id} title={!course.release_id ? 'Publish a reviewed course release in Expert Studio before completing training' : undefined} onClick={() => void completeSection('playground')}>Mark section complete<Check size={14}/></button>}{progress.interview_unlocked && <button type="button" className="learning-button header-interview-btn" onClick={() => setTab('interview')}>Continue to interview<ArrowRight size={14}/></button>}</>}/></div>}
+        {tab === 'course' && <div className="learning-course-layout"><section className="learning-player-panel"><div className="learning-section-toolbar"><span>{progress.manual_completion?.course ? 'Manually completed' : progress.course_completed ? 'Course viewing complete' : 'Course section'}</span><div>{!progress.course_completed && <button className="learning-button learning-button-secondary" disabled={busy || !course.release_id} title={!course.release_id ? 'Publish a reviewed course release in Expert Studio before completing training' : undefined} onClick={() => void completeSection('course')}>Mark section complete<Check size={15} /></button>}{progress.playground_unlocked && <button className="learning-button" onClick={() => setTab('playground')}>Continue to playground<ArrowRight size={15} /></button>}</div></div><CoursePlayer key={`${course.release_id}:${course.release_content_hash}:${courseRecordingIdentity(course.video_url)}:${course.video_duration_seconds}`} course={course} progress={progress} onProgress={updateProgress} onMessage={setMessage} /></section></div>}
+        {tab === 'playground' && <div className="learning-embedded-workspace"><Playground key={`playground-${resetEpoch}`} persistenceKey={`takumi-course-attempt:${course.release_id}:${course.release_content_hash ?? ''}:${courseRecordingKey(course.video_url ?? '')}:${course.video_duration_seconds}`} embedded onActivity={setActionCount} onMessage={setMessage} onAttemptComplete={recordAttempt} onContinueToInterview={() => { if (progress.interview_unlocked) setTab('interview'); else setMessage('Complete the playground section before continuing to the interview.'); }} headerAction={<>{!playgroundCompleted && <button type="button" className="learning-button learning-button-secondary header-complete-btn" disabled={busy || !course.release_id} title={!course.release_id ? 'Publish a reviewed course release in Expert Studio before completing training' : undefined} onClick={() => void completeSection('playground')}>Mark section complete<Check size={14} /></button>}{progress.interview_unlocked && <button type="button" className="learning-button header-interview-btn" onClick={() => setTab('interview')}>Continue to interview<ArrowRight size={14} /></button>}</>} /></div>}
         {tab === 'interview' && (
           <div className="learning-interview-layout">
             <section className="learning-panel learning-interview-panel">
@@ -289,15 +290,15 @@ export default function CourseHub() {
                       {interview?.status === 'completed'
                         ? 'Course evaluation'
                         : interviewMode === 'choice'
-                        ? 'Virtual interview'
-                        : 'Technical viva'}
+                          ? 'Virtual interview'
+                          : 'Technical viva'}
                     </h2>
                     <span className="learning-tag">
                       {interview?.status === 'completed'
                         ? 'Completed'
                         : interviewMode === 'choice'
-                        ? 'Choose format'
-                        : 'Structured interview'}
+                          ? 'Choose format'
+                          : 'Structured interview'}
                     </span>
                     {interviewMode === 'structured' && (
                       <button
@@ -491,11 +492,11 @@ export default function CourseHub() {
                         <span>Playground release decision</span>
                         <strong>
                           {interview.result.playground_assessed === false ||
-                          !progress.playground_result
+                            !progress.playground_result
                             ? 'No simulation result'
                             : interview.result.critical_playground_error
-                            ? 'Review needed'
-                            : 'Recorded'}
+                              ? 'Review needed'
+                              : 'Recorded'}
                         </strong>
                       </div>
                       <button
@@ -597,13 +598,13 @@ export default function CourseHub() {
             </aside>
           </div>
         )}
-        {tab === 'dashboard' && <FinalEvaluation progress={progress} onDownload={downloadReport}/>}
+        {tab === 'dashboard' && <FinalEvaluation progress={progress} onDownload={downloadReport} />}
       </>}
     </main>
     <footer className="learning-status" aria-label="Learning status">
       <div className="learning-status-content">
         <div>
-          <ShieldCheck size={15}/>
+          <ShieldCheck size={15} />
           <span className="learning-status-message" title={message}>{message}</span>
           {tab === 'playground' && <span className="learning-action-count">{actionCount} recorded actions</span>}
           {failedAttempt && <button disabled={busy} onClick={() => void recordAttempt(failedAttempt)}>{busy ? 'Saving…' : 'Retry saving result'}</button>}

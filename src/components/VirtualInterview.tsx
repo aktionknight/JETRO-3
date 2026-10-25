@@ -22,23 +22,27 @@ interface TranscriptEntry {
   text: string;
 }
 
-// Support SpeechRecognition across browsers
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const SpeechRecognitionAPI: any =
-  typeof window !== 'undefined'
-    ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-    : null;
+interface SpeechRecognizer {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: { results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  abort(): void;
+}
+
+// SpeechRecognition is not included in TypeScript's DOM declarations.
+const speechWindow = window as Window & {
+  SpeechRecognition?: new () => SpeechRecognizer;
+  webkitSpeechRecognition?: new () => SpeechRecognizer;
+  webkitAudioContext?: typeof AudioContext;
+};
+const SpeechRecognitionAPI = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
 
 export default function VirtualInterview({ token, onEnd }: VirtualInterviewProps) {
-  const [status, storeStatus] = useState<Status>('idle');
-  const statusRef = useRef<Status>('idle');
-  const mutedRef = useRef(false);
-  const setStatus = useCallback((next: Status | ((current: Status) => Status)) => {
-    const value = typeof next === 'function' ? next(statusRef.current) : next;
-    statusRef.current = value;
-    storeStatus(value);
-  }, []);
+  const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState('');
   const [remaining, setRemaining] = useState(120);
   const [elapsed, setElapsed] = useState(0);
@@ -47,214 +51,246 @@ export default function VirtualInterview({ token, onEnd }: VirtualInterviewProps
   const [isMuted, setIsMuted] = useState(false);
   const [interimSpeech, setInterimSpeech] = useState('');
   const [typedInput, setTypedInput] = useState('');
+  const [captureRevision, setCaptureRevision] = useState(0);
 
   const wsRef = useRef<WebSocket | null>(null);
   const playbackContextRef = useRef<AudioContext | null>(null);
-  const playbackQueueRef = useRef<ArrayBuffer[]>([]);
+  const playbackQueueRef = useRef<Float32Array[]>([]);
   const isPlayingRef = useRef(false);
-  const playbackEpochRef = useRef(0);
-  const playbackSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const finishPlaybackRef = useRef<(() => void) | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recognitionRef = useRef<any>(null);
+  const playbackGenerationRef = useRef(0);
+  const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const finishSourceRef = useRef<(() => void) | null>(null);
+  const mountedRef = useRef(false);
+  const desiredStatusRef = useRef<Status>('idle');
+  const mutedRef = useRef(false);
+  const finalizedAnswerRef = useRef('');
+  const interimAnswerRef = useRef('');
+  const answerRef = useRef('');
+  const recognitionRef = useRef<SpeechRecognizer | null>(null);
   const interimTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const restartTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
-  const animFrameRef = useRef<number>(0);
 
   // Auto-scroll transcript
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [transcript, interimSpeech]);
 
-  // Clean up audio
-  const stopAudio = useCallback(() => {
-    playbackEpochRef.current += 1;
+  const stopRecognition = useCallback((owner = recognitionRef.current) => {
+    if (owner && recognitionRef.current !== owner) return;
+    recognitionRef.current = null;
     if (interimTimeoutRef.current) {
       clearTimeout(interimTimeoutRef.current);
       interimTimeoutRef.current = null;
     }
-    if (playbackSourceRef.current) {
-      try { playbackSourceRef.current.stop(); } catch { /* Already stopped. */ }
-      playbackSourceRef.current = null;
+    if (restartTimeoutRef.current) {
+      clearTimeout(restartTimeoutRef.current);
+      restartTimeoutRef.current = null;
     }
-    finishPlaybackRef.current?.();
-    finishPlaybackRef.current = null;
-    if (recognitionRef.current) {
-      recognitionRef.current.onend = null;
-      recognitionRef.current.onresult = null;
-      recognitionRef.current.onerror = null;
+    if (owner) {
+      owner.onend = null;
+      owner.onresult = null;
+      owner.onerror = null;
       try {
-        recognitionRef.current.stop();
+        owner.abort();
       } catch {
-        // ignore
+        // The browser may already have ended this recognizer.
       }
-      recognitionRef.current = null;
     }
-    if (playbackContextRef.current) {
-      playbackContextRef.current.close().catch(() => {});
-      playbackContextRef.current = null;
-    }
-    if (animFrameRef.current) {
-      cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = 0;
-    }
-    playbackQueueRef.current = [];
-    isPlayingRef.current = false;
   }, []);
 
-  // Send apprentice turn to backend
-  const sendAnswer = useCallback((textToSend: string) => {
-    const trimmed = textToSend.trim();
-    if (!trimmed || statusRef.current !== 'listening' || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    setStatus('thinking');
-    if (recognitionRef.current) {
-      recognitionRef.current.onend = null;
+  const canListen = useCallback(() => (
+    mountedRef.current && wsRef.current?.readyState === WebSocket.OPEN &&
+    desiredStatusRef.current === 'listening' && !mutedRef.current && !isPlayingRef.current
+  ), []);
+
+  const stopAudio = useCallback(() => {
+    stopRecognition();
+    playbackGenerationRef.current += 1;
+    const source = activeSourceRef.current;
+    activeSourceRef.current = null;
+    if (source) {
+      source.onended = null;
       try {
-        recognitionRef.current.stop();
+        source.stop();
       } catch {
-        // ignore
+        // The source may have finished before teardown.
       }
     }
-    if (interimTimeoutRef.current) {
-      clearTimeout(interimTimeoutRef.current);
-      interimTimeoutRef.current = null;
-    }
+    finishSourceRef.current?.();
+    finishSourceRef.current = null;
+    const context = playbackContextRef.current;
+    playbackContextRef.current = null;
+    context?.close().catch(() => { });
+    playbackQueueRef.current = [];
+    isPlayingRef.current = false;
+  }, [stopRecognition]);
 
+  const sendAnswer = useCallback((textToSend: string, automatic = false) => {
+    const text = textToSend.trim();
+    const ws = wsRef.current;
+    if (!text || !mountedRef.current || !ws || ws.readyState !== WebSocket.OPEN ||
+      desiredStatusRef.current !== 'listening' || isPlayingRef.current ||
+      (automatic && !canListen())) return;
+
+    desiredStatusRef.current = 'thinking';
+    stopRecognition();
+    setStatus('thinking');
+    try {
+      ws.send(JSON.stringify({ type: 'user_turn', text }));
+    } catch {
+      desiredStatusRef.current = 'listening';
+      finalizedAnswerRef.current = answerRef.current;
+      interimAnswerRef.current = '';
+      setCaptureRevision(revision => revision + 1);
+      setStatus('listening');
+      return;
+    }
+    finalizedAnswerRef.current = '';
+    interimAnswerRef.current = '';
+    answerRef.current = '';
     setInterimSpeech('');
     setTypedInput('');
+  }, [canListen, stopRecognition]);
 
-    wsRef.current.send(JSON.stringify({ type: 'user_turn', text: trimmed }));
-  }, [setStatus]);
-
-  // Keep the microphone closed until the entire examiner turn has played.
+  // Claim playback before any await so a following listening event cannot open capture.
   const playAudioChunk = useCallback(async (base64Data: string) => {
-    const epoch = playbackEpochRef.current;
-    let ownsPlayback = false;
+    if (!mountedRef.current || ['evaluating', 'ended', 'error'].includes(desiredStatusRef.current)) return;
+    const alreadyPlaying = isPlayingRef.current;
+    isPlayingRef.current = true;
+    stopRecognition();
+    setStatus('speaking');
+    const generation = playbackGenerationRef.current;
     try {
       const binary = atob(base64Data);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       const samples = new Int16Array(bytes.buffer);
-      const floats = new Float32Array(samples.length);
-      for (let i = 0; i < samples.length; i++) floats[i] = samples[i] / 32768;
-      playbackQueueRef.current.push(floats.buffer);
-      if (isPlayingRef.current) return;
-      ownsPlayback = true;
-      isPlayingRef.current = true;
-      setStatus('speaking');
+      const decoded = new Float32Array(samples.length);
+      for (let i = 0; i < samples.length; i++) decoded[i] = samples[i] / 32768;
+      playbackQueueRef.current.push(decoded);
+      if (alreadyPlaying) return;
+
       if (!playbackContextRef.current || playbackContextRef.current.state === 'closed') {
-        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        const AudioCtx = window.AudioContext || speechWindow.webkitAudioContext!;
         playbackContextRef.current = new AudioCtx({ sampleRate: 24000 });
       }
       const ctx = playbackContextRef.current;
       if (ctx.state === 'suspended') await ctx.resume();
-      while (epoch === playbackEpochRef.current && playbackQueueRef.current.length) {
-        const data = new Float32Array(playbackQueueRef.current.shift()!);
-        const buffer = ctx.createBuffer(1, data.length, 24000);
-        buffer.getChannelData(0).set(data);
+      while (mountedRef.current && generation === playbackGenerationRef.current && playbackQueueRef.current.length) {
+        const samplesToPlay = playbackQueueRef.current.shift()!;
+        const buffer = ctx.createBuffer(1, samplesToPlay.length, 24000);
+        buffer.getChannelData(0).set(samplesToPlay);
         const source = ctx.createBufferSource();
         source.buffer = buffer;
         source.connect(ctx.destination);
-        playbackSourceRef.current = source;
-        await new Promise<void>(resolve => {
-          finishPlaybackRef.current = resolve;
+        activeSourceRef.current = source;
+        await new Promise<void>((resolve) => {
+          finishSourceRef.current = resolve;
           source.onended = () => resolve();
           source.start();
         });
-        if (playbackSourceRef.current === source) playbackSourceRef.current = null;
+        if (generation !== playbackGenerationRef.current) return;
+        activeSourceRef.current = null;
+        finishSourceRef.current = null;
       }
     } catch {
-      if (epoch === playbackEpochRef.current) {
-        if (ownsPlayback) playbackQueueRef.current = [];
+      if (generation === playbackGenerationRef.current) {
+        playbackQueueRef.current = [];
         setError('Examiner audio could not play. Read the question and speak or type your answer.');
       }
     } finally {
-      if (ownsPlayback && epoch === playbackEpochRef.current) {
-        finishPlaybackRef.current = null;
+      if (!alreadyPlaying && mountedRef.current && generation === playbackGenerationRef.current) {
         isPlayingRef.current = false;
-        if (statusRef.current === 'speaking') setStatus('listening');
+        activeSourceRef.current = null;
+        finishSourceRef.current = null;
+        setStatus(desiredStatusRef.current);
+        // React may batch speaking and listening into an unchanged displayed status.
+        if (canListen()) setCaptureRevision(revision => revision + 1);
       }
     }
-  }, [setStatus]);
+  }, [canListen, stopRecognition]);
 
-  // Each listening turn owns its recognizer; disposed callbacks cannot restart it.
   useEffect(() => {
-    if (status !== 'listening' || isMuted) return;
+    if (!canListen()) return;
     if (!SpeechRecognitionAPI) {
       setError('Voice recognition is unavailable in this browser. Type your answer below.');
       return;
     }
     const recognition = new SpeechRecognitionAPI();
-    recognitionRef.current = recognition;
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
-    let disposed = false;
-    let retryAllowed = true;
+    recognitionRef.current = recognition;
+    let prefix = finalizedAnswerRef.current;
+    let restartAllowed = true;
     let failures = 0;
-    let prefix = '';
-    let latestText = '';
-    let restartTimer: ReturnType<typeof setTimeout> | null = null;
-    const active = () => !disposed && recognitionRef.current === recognition
-      && statusRef.current === 'listening' && !mutedRef.current;
+    const ownsCapture = () => recognitionRef.current === recognition && canListen();
+    interimAnswerRef.current = '';
+    answerRef.current = prefix;
+    setInterimSpeech(prefix);
     const restart = () => {
-      if (!active() || !retryAllowed) return;
-      try { recognition.start(); }
-      catch {
-        if (++failures < 3) restartTimer = setTimeout(restart, 300);
-        else setError('Microphone could not restart. Toggle the microphone to retry, or type your answer.');
+      restartTimeoutRef.current = null;
+      if (!restartAllowed || !ownsCapture()) return;
+      try {
+        recognition.start();
+      } catch {
+        if (++failures < 3) restartTimeoutRef.current = setTimeout(restart, 300);
+        else {
+          setError('Microphone could not restart. Toggle the microphone to retry, or type your answer.');
+          stopRecognition(recognition);
+        }
       }
     };
-    recognition.onresult = (event: any) => {
-      if (!active()) return;
-      // resultIndex is only the changed suffix; rebuild all results to retain earlier words.
-      let text = '';
-      for (let index = 0; index < event.results.length; index++) {
-        text += event.results[index][0].transcript + ' ';
-      }
-      latestText = `${prefix} ${text}`.trim();
-      setInterimSpeech(latestText);
+
+    recognition.onresult = (event) => {
+      if (!ownsCapture()) return;
       failures = 0;
-      if (interimTimeoutRef.current) clearTimeout(interimTimeoutRef.current);
-      if (latestText) {
+      const finals: string[] = [];
+      const interim: string[] = [];
+      for (let i = 0; i < event.results.length; i++) {
+        (event.results[i].isFinal ? finals : interim).push(event.results[i][0].transcript.trim());
+      }
+      finalizedAnswerRef.current = [prefix, ...finals].filter(Boolean).join(' ');
+      interimAnswerRef.current = interim.filter(Boolean).join(' ');
+      answerRef.current = [finalizedAnswerRef.current, interimAnswerRef.current].filter(Boolean).join(' ');
+      setInterimSpeech(answerRef.current);
+      clearTimeout(interimTimeoutRef.current ?? undefined);
+      interimTimeoutRef.current = null;
+      if (answerRef.current.length > 10) {
         interimTimeoutRef.current = setTimeout(() => {
-          if (active()) sendAnswer(latestText);
+          interimTimeoutRef.current = null;
+          if (ownsCapture()) sendAnswer(answerRef.current, true);
         }, 1800);
       }
     };
-    recognition.onerror = (event: any) => {
-      if (!active()) return;
+    recognition.onerror = (event) => {
+      if (!ownsCapture()) return;
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        retryAllowed = false;
+        restartAllowed = false;
         setError('Microphone permission was denied. Allow microphone access, then toggle the microphone to retry.');
+        stopRecognition(recognition);
       } else if (event.error === 'audio-capture') {
-        retryAllowed = false;
+        restartAllowed = false;
         setError('No microphone input is available. Check your microphone and toggle it to retry.');
+        stopRecognition(recognition);
       } else if (event.error !== 'no-speech' && event.error !== 'aborted' && ++failures >= 3) {
-        retryAllowed = false;
+        restartAllowed = false;
         setError('Speech recognition is unavailable. Toggle the microphone to retry, or type your answer.');
+        stopRecognition(recognition);
       }
     };
     recognition.onend = () => {
-      if (!active() || !retryAllowed) return;
-      prefix = latestText;
-      restartTimer = setTimeout(restart, 250);
+      if (!restartAllowed || !ownsCapture()) return;
+      prefix = finalizedAnswerRef.current;
+      interimAnswerRef.current = '';
+      answerRef.current = prefix;
+      setInterimSpeech(prefix);
+      restart();
     };
     restart();
-    return () => {
-      disposed = true;
-      if (restartTimer) clearTimeout(restartTimer);
-      if (interimTimeoutRef.current) {
-        clearTimeout(interimTimeoutRef.current);
-        interimTimeoutRef.current = null;
-      }
-      recognition.onend = null;
-      recognition.onresult = null;
-      recognition.onerror = null;
-      try { recognition.abort(); } catch { /* Already stopped. */ }
-      if (recognitionRef.current === recognition) recognitionRef.current = null;
-    };
-  }, [status, isMuted, sendAnswer]);
+    return () => stopRecognition(recognition);
+  }, [status, isMuted, captureRevision, canListen, sendAnswer, stopRecognition]);
 
   // Audio wave visualizer animation
   useEffect(() => {
@@ -273,42 +309,57 @@ export default function VirtualInterview({ token, onEnd }: VirtualInterviewProps
     return () => cancelAnimationFrame(frameId);
   }, [status, interimSpeech]);
 
-  // Start interview session
-  const startInterview = useCallback(async () => {
+  const startInterview = useCallback(() => {
+    const previous = wsRef.current;
+    wsRef.current = null;
+    previous?.close();
+    desiredStatusRef.current = 'connecting';
     stopAudio();
     setStatus('connecting');
     setError('');
     setTranscript([]);
+    finalizedAnswerRef.current = '';
+    interimAnswerRef.current = '';
+    answerRef.current = '';
     setInterimSpeech('');
     setTypedInput('');
-    playbackQueueRef.current = [];
+
+    const generation = playbackGenerationRef.current;
+    try {
+      // Unlock output during the gesture; unavailable audio must not block text interviewing.
+      const AudioCtx = window.AudioContext || speechWindow.webkitAudioContext!;
+      const context = new AudioCtx({ sampleRate: 24000 });
+      playbackContextRef.current = context;
+      void context.resume().catch(() => {
+        if (mountedRef.current && generation === playbackGenerationRef.current) {
+          setError('Examiner audio could not play. Read the question and speak or type your answer.');
+        }
+      });
+    } catch {
+      setError('Examiner audio could not play. Read the question and speak or type your answer.');
+    }
 
     try {
-      // Resume output from the Start click rather than a later WebSocket callback.
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      playbackContextRef.current = new AudioCtx({ sampleRate: 24000 });
-      await playbackContextRef.current.resume();
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${protocol}//${window.location.host}/api/v1/learning/interview/live?token=${encodeURIComponent(token)}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
-
+      const current = () => mountedRef.current && wsRef.current === ws;
       ws.onmessage = (event) => {
-        if (wsRef.current !== ws) return;
+        if (!current()) return;
         try {
           const msg = JSON.parse(event.data);
           switch (msg.type) {
             case 'status':
-              if (msg.status === 'ended') {
-                setStatus('ended');
-                stopAudio();
-                onEnd?.(msg.duration || elapsed);
-              } else if (msg.status !== 'listening' || !isPlayingRef.current) {
-                setStatus(msg.status as Status);
-              }
+              if (['ended', 'error'].includes(desiredStatusRef.current) ||
+                (desiredStatusRef.current === 'evaluating' && !['ended', 'error'].includes(msg.status))) break;
+              desiredStatusRef.current = msg.status as Status;
+              if (['evaluating', 'ended', 'error'].includes(msg.status)) stopAudio();
+              setStatus(isPlayingRef.current ? 'speaking' : desiredStatusRef.current);
+              if (msg.status === 'ended') onEnd?.(msg.duration || elapsed);
               break;
             case 'audio':
-              playAudioChunk(msg.data);
+              void playAudioChunk(msg.data);
               break;
             case 'transcript':
               setTranscript((prev) => {
@@ -324,58 +375,68 @@ export default function VirtualInterview({ token, onEnd }: VirtualInterviewProps
               setElapsed(msg.elapsed);
               break;
             case 'error':
+              desiredStatusRef.current = 'error';
+              stopAudio();
               setError(msg.message);
               setStatus('error');
-              stopAudio();
               break;
             case 'voice_error':
               setError(msg.message);
               break;
           }
         } catch {
-          // ignore
+          // Ignore malformed server events.
         }
       };
-
       ws.onerror = () => {
-        if (wsRef.current !== ws) return;
+        if (!current()) return;
+        desiredStatusRef.current = 'error';
+        stopAudio();
         setError('Connection to live interview service failed.');
         setStatus('error');
-        stopAudio();
       };
-
       ws.onclose = () => {
-        if (wsRef.current !== ws) return;
-        setStatus((cur) => (cur !== 'ended' && cur !== 'error' ? 'ended' : cur));
+        if (!current()) return;
+        if (!['ended', 'error'].includes(desiredStatusRef.current)) desiredStatusRef.current = 'ended';
         stopAudio();
+        setStatus(desiredStatusRef.current);
       };
     } catch (err) {
+      desiredStatusRef.current = 'error';
+      stopAudio();
       setError(err instanceof Error ? err.message : 'Failed to connect to interview');
       setStatus('error');
-      stopAudio();
     }
   }, [token, stopAudio, playAudioChunk, onEnd, elapsed]);
 
   const endInterview = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'end' }));
-    }
-    setStatus('evaluating');
+    desiredStatusRef.current = 'evaluating';
     stopAudio();
+    setStatus('evaluating');
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(JSON.stringify({ type: 'end' }));
+      } catch {
+        // Socket closure still performs local teardown.
+      }
+    }
   }, [stopAudio]);
 
   const toggleMute = () => {
     mutedRef.current = !mutedRef.current;
+    if (mutedRef.current) stopRecognition();
     setIsMuted(mutedRef.current);
     setError('');
   };
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
+      const ws = wsRef.current;
+      wsRef.current = null;
       stopAudio();
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
+      ws?.close();
     };
   }, [stopAudio]);
 
@@ -503,10 +564,10 @@ export default function VirtualInterview({ token, onEnd }: VirtualInterviewProps
                     status === 'speaking'
                       ? 10 + Math.sin(Date.now() / 150 + i * 0.4) * 22
                       : status === 'listening' && interimSpeech
-                      ? 8 + audioLevel * 35 + Math.sin(Date.now() / 200 + i * 0.8) * 10
-                      : status === 'listening'
-                      ? 6 + Math.sin(Date.now() / 400 + i * 0.2) * 4
-                      : 4;
+                        ? 8 + audioLevel * 35 + Math.sin(Date.now() / 200 + i * 0.8) * 10
+                        : status === 'listening'
+                          ? 6 + Math.sin(Date.now() / 400 + i * 0.2) * 4
+                          : 4;
                   return <div key={i} className="vi-wave-bar" style={{ height: `${height}px` }} />;
                 })}
               </div>

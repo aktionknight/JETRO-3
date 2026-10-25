@@ -1,3 +1,5 @@
+import json
+
 from app.ai.base import ProviderError
 from app.ai.studio_analysis import Critique, Findings, Proposals
 from app.services import studio_analysis_service as service
@@ -39,6 +41,8 @@ def test_provider_uses_json_schema_transport_for_strict_outputs(settings_factory
         assert config.thinking_config.thinking_level == "LOW"
         assert config.response_json_schema["additionalProperties"] is False
         assert config.response_json_schema["$defs"]["Finding"]["additionalProperties"] is False
+        # Gemini returns 400 INVALID_ARGUMENT for the nested Findings array limits.
+        assert "maxItems" not in json.dumps(config.response_json_schema)
         return SimpleNamespace(text='{"findings": []}')
 
     monkeypatch.setattr(agents.client.models, "generate_content", generate)

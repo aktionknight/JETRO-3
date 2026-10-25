@@ -222,8 +222,7 @@ def _deterministic(data):
             "missing_information": f"Expert clarification needed: {candidate.gap_type}.",
             "rationale": "Deterministic missing-field template; expert review required.",
         }
-        for candidate in detect_gaps(data["units"])
-        if (candidate.knowledge_unit_id, candidate.gap_type) not in prior
+        for candidate in detect_gaps(data["units"], excluded_pairs=prior)
     ]
 
 

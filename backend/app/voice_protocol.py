@@ -5,10 +5,13 @@ def normalize_event(event):
     if kind=='conversation.item.input_audio_transcription.completed':
         content=event.get('transcript','')
         identity=event.get('item_id')
-        if not identity or not isinstance(content,str) or not content.strip() or len(content)>10000:return None
+        if not isinstance(identity,str) or not 1<=len(identity)<=128 or not isinstance(content,str) or not content.strip() or len(content)>10000:return None
         return {'kind':'answer','id':identity,'text':content.strip()}
     if kind=='output_audio_buffer.stopped':return {'kind':'delivered','response_id':event.get('response_id')}
-    if kind=='input_audio_buffer.speech_started':return {'kind':'interruption','item_id':event.get('item_id')}
+    if kind=='input_audio_buffer.speech_started':
+        identity=event.get('item_id')
+        if not isinstance(identity,str) or not 1<=len(identity)<=128:return None
+        return {'kind':'interruption','item_id':identity}
     if kind in ('output_audio_buffer.cleared','response.cancelled'):return {'kind':'interrupted','response_id':event.get('response_id')}
     if kind=='response.created':return {'kind':'response_created','response_id':event.get('response',{}).get('id')}
     if kind=='error':return {'kind':'error'}

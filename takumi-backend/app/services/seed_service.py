@@ -33,7 +33,8 @@ FIXTURE_TASK_ID = "task_001"
 
 
 def seed_demo(
-    session, state: Literal["fresh", "approved_baseline"] = "fresh", provider=None
+    session, state: Literal["fresh", "approved_baseline"] = "fresh", provider=None,
+    *, initial_revision: int = 1,
 ) -> bool:
     if session.get(Task, FIXTURE_TASK_ID) is not None:
         return False
@@ -58,7 +59,7 @@ def seed_demo(
     draft = Draft(
         id=fixture["draft"]["id"],
         task_id=task.id,
-        revision=1,
+        revision=initial_revision,
         status="draft",
         knowledge_units=units,
         created_at=utcnow(),
@@ -69,7 +70,7 @@ def seed_demo(
     session.add(
         DraftRevision(
             draft_id=draft.id,
-            revision=1,
+            revision=initial_revision,
             knowledge_units=units,
             actor_id="system",
             reason="seed",
@@ -120,6 +121,7 @@ def seed_demo(
 
 
 def reset_demo(session, state: Literal["fresh", "approved_baseline"] = "fresh") -> list[str]:
+    revision = session.scalar(select(Draft.revision).where(Draft.task_id == FIXTURE_TASK_ID)) or 0
     storage_keys = list(
         session.scalars(select(MediaAsset.storage_key).where(MediaAsset.task_id == FIXTURE_TASK_ID))
     )
@@ -145,5 +147,5 @@ def reset_demo(session, state: Literal["fresh", "approved_baseline"] = "fresh") 
         session.execute(delete(model).where(model.task_id == FIXTURE_TASK_ID))
     session.execute(delete(Task).where(Task.id == FIXTURE_TASK_ID))
     session.flush()
-    seed_demo(session, state)
+    seed_demo(session, state, initial_revision=revision + 1)
     return storage_keys

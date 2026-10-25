@@ -112,6 +112,39 @@ def test_apply_field_updates_is_pure():
     ]
 
 
+def test_same_text_confirmation_adds_support_without_mutating_input():
+    unit = {
+        "action": "Inspect",
+        "cue": None,
+        "field_evidence": {},
+        "evidence_ids": ["ev_old"],
+        "review_status": "approved",
+    }
+    original = deepcopy(unit)
+    confirmed = apply_field_updates(unit, {"action": "Inspect", "cue": None}, "ev_confirm")
+    assert unit == original
+    assert confirmed["field_evidence"] == {"action": ["ev_confirm"]}
+    assert confirmed["evidence_ids"] == ["ev_old", "ev_confirm"]
+    assert confirmed["review_status"] == "draft"
+    assert apply_field_updates(confirmed, {"action": "Inspect"}, "ev_confirm") == confirmed
+    assert apply_field_updates(unit, {"action": "Inspect"}, None) == original
+    assert apply_field_updates(unit, {"cue": None}, "ev_confirm") == original
+
+
+def test_unchanged_patch_keeps_approval_and_provenance(client):
+    headers = auth(client, "reviewer")
+    assert review_change(client, headers, operation="approve").status_code == 200
+    before = client.get(PATH, headers=headers).json()["knowledge_units"][0]
+    with client.app.state.sessionmaker() as session:
+        evidence_before = list(session.scalars(select(Evidence.id).order_by(Evidence.id)))
+    response = patch(client, headers, {"action": before["action"]}, revision=2)
+    assert response.status_code == 200
+    assert response.json()["correction_evidence_ids"] == []
+    assert client.get(PATH, headers=headers).json()["knowledge_units"][0] == before
+    with client.app.state.sessionmaker() as session:
+        assert list(session.scalars(select(Evidence.id).order_by(Evidence.id))) == evidence_before
+
+
 def review_change(client, headers, *, unit="ku_001", revision=1, **change):
     return client.patch(
         PATH,

@@ -17,6 +17,7 @@ from copy import deepcopy
 import httpx
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
+from starlette.websockets import WebSocketState
 
 from app.core.security import DEMO_USERS, CurrentUser, _verify
 from app.learning import live_evaluation, service
@@ -156,7 +157,9 @@ async def _generate_text(
             "maxOutputTokens": 300,
         },
     }
-    resp = await client.post(url, headers={"x-goog-api-key": api_key}, json=payload, timeout=20.0)
+    resp = await client.post(
+        url, headers={"x-goog-api-key": api_key}, json=payload, timeout=20.0
+    )
     resp.raise_for_status()
     data = resp.json()
     candidates = data.get("candidates", [])
@@ -183,7 +186,9 @@ async def _synthesize_speech(
             "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Aoede"}}},
         },
     }
-    resp = await client.post(url, headers={"x-goog-api-key": api_key}, json=payload, timeout=25.0)
+    resp = await client.post(
+        url, headers={"x-goog-api-key": api_key}, json=payload, timeout=25.0
+    )
     resp.raise_for_status()
     data = resp.json()
     candidates = data.get("candidates", [])
@@ -197,7 +202,7 @@ async def _synthesize_speech(
     return "", ""
 
 
-async def _report_voice_error(ws, exc):
+async def _report_voice_error(send_event, exc: Exception) -> bool:
     status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
     logger.warning("Gemini TTS unavailable: status=%s exception=%s", status, type(exc).__name__)
     message = (
@@ -206,7 +211,7 @@ async def _report_voice_error(ws, exc):
         if status == 429
         else "Gemini could not generate interviewer audio. Check the voice service configuration."
     )
-    await ws.send_json({"type": "voice_error", "message": message})
+    return await send_event({"type": "voice_error", "message": message})
 
 
 @router.websocket("/interview/live")
@@ -253,12 +258,32 @@ async def live_interview_ws(ws: WebSocket):
     system_prompt = _build_system_prompt(rel_context, [], video_info)
     model_name = settings.gemini_model or "gemini-3.5-flash-lite"
 
-    await ws.accept()
-    await ws.send_json({"type": "status", "status": "connecting"})
-
     start_time = time.monotonic()
     client_closed = asyncio.Event()
+    disconnected = False
     conversation_history: list[dict] = []
+
+    async def send_event(payload: dict) -> bool:
+        nonlocal disconnected
+        if disconnected:
+            return False
+        try:
+            await ws.send_json(payload)
+            return True
+        except (WebSocketDisconnect, OSError):
+            pass
+        except RuntimeError:
+            if (
+                ws.application_state != WebSocketState.DISCONNECTED
+                and ws.client_state != WebSocketState.DISCONNECTED
+            ):
+                raise
+        disconnected = True
+        client_closed.set()
+        return False
+
+    await ws.accept()
+    await send_event({"type": "status", "status": "connecting"})
 
     async with httpx.AsyncClient() as http_client:
         try:
@@ -289,35 +314,33 @@ async def live_interview_ws(ws: WebSocket):
                     http_client, api_key, greeting_text
                 )
             except Exception as tts_err:
-                await _report_voice_error(ws, tts_err)
+                await _report_voice_error(send_event, tts_err)
 
             # Send greeting to client
-            await ws.send_json({"type": "status", "status": "connected"})
-            await ws.send_json({"type": "transcript", "role": "model", "text": greeting_text})
+            await send_event({"type": "status", "status": "connected"})
+            await send_event({"type": "transcript", "role": "model", "text": greeting_text})
             if audio_base64:
-                await ws.send_json(
+                await send_event(
                     {
                         "type": "audio",
                         "data": audio_base64,
                         "mimeType": mime_type,
                     }
                 )
-            await ws.send_json({"type": "status", "status": "listening"})
+            await send_event({"type": "status", "status": "listening"})
 
             # Background timer task
             async def timer_task():
                 while not client_closed.is_set():
                     elapsed = time.monotonic() - start_time
                     remaining = max(0, INTERVIEW_DURATION_SECONDS - elapsed)
-                    try:
-                        await ws.send_json(
-                            {
-                                "type": "timer",
-                                "remaining": round(remaining, 1),
-                                "elapsed": round(elapsed, 1),
-                            }
-                        )
-                    except Exception:
+                    if not await send_event(
+                        {
+                            "type": "timer",
+                            "remaining": round(remaining, 1),
+                            "elapsed": round(elapsed, 1),
+                        }
+                    ):
                         break
 
                     if remaining <= 0:
@@ -335,6 +358,7 @@ async def live_interview_ws(ws: WebSocket):
                     except TimeoutError:
                         continue
                     except WebSocketDisconnect:
+                        disconnected = True
                         client_closed.set()
                         break
 
@@ -354,21 +378,22 @@ async def live_interview_ws(ws: WebSocket):
                         if not user_text:
                             continue
 
-                        await ws.send_json(
-                            {
-                                "type": "transcript",
-                                "role": "user",
-                                "text": user_text,
-                            }
-                        )
-                        await ws.send_json({"type": "status", "status": "thinking"})
-
                         conversation_history.append(
                             {
                                 "role": "user",
                                 "parts": [{"text": user_text}],
                             }
                         )
+                        if not await send_event(
+                            {
+                                "type": "transcript",
+                                "role": "user",
+                                "text": user_text,
+                            }
+                        ):
+                            break
+                        if not await send_event({"type": "status", "status": "thinking"}):
+                            break
 
                         elapsed = time.monotonic() - start_time
                         remaining = max(0, INTERVIEW_DURATION_SECONDS - elapsed)
@@ -383,63 +408,70 @@ async def live_interview_ws(ws: WebSocket):
                             examiner_text = await _generate_text(
                                 http_client, api_key, model_name, turn_prompt, conversation_history
                             )
-                            conversation_history.append(
-                                {
-                                    "role": "model",
-                                    "parts": [{"text": examiner_text}],
-                                }
-                            )
-
-                            turn_audio, turn_mime = "", "audio/L16;codec=pcm;rate=24000"
-                            try:
-                                turn_audio, turn_mime = await _synthesize_speech(
-                                    http_client, api_key, examiner_text
-                                )
-                            except Exception as tts_err:
-                                await _report_voice_error(ws, tts_err)
-
-                            await ws.send_json(
-                                {
-                                    "type": "transcript",
-                                    "role": "model",
-                                    "text": examiner_text,
-                                }
-                            )
-                            if turn_audio:
-                                await ws.send_json(
-                                    {
-                                        "type": "audio",
-                                        "data": turn_audio,
-                                        "mimeType": turn_mime,
-                                    }
-                                )
-
-                            if remaining <= 10:
-                                await asyncio.sleep(4)
-                                client_closed.set()
-                                break
-                            else:
-                                await ws.send_json({"type": "status", "status": "listening"})
-
                         except Exception as gen_err:
-                            logger.error("Error generating turn: %s", gen_err)
-                            await ws.send_json(
+                            logger.error("Error generating turn: %s", type(gen_err).__name__)
+                            if not await send_event(
                                 {
                                     "type": "transcript",
                                     "role": "model",
-                                    "text": ("Thank you. Let us continue with the next check."),
+                                    "text": "Thank you. Let us continue with the next check.",
                                 }
+                            ):
+                                break
+                            if not await send_event({"type": "status", "status": "listening"}):
+                                break
+                            continue
+
+                        conversation_history.append(
+                            {
+                                "role": "model",
+                                "parts": [{"text": examiner_text}],
+                            }
+                        )
+                        turn_audio, turn_mime = "", "audio/L16;codec=pcm;rate=24000"
+                        try:
+                            turn_audio, turn_mime = await _synthesize_speech(
+                                http_client, api_key, examiner_text
                             )
-                            await ws.send_json({"type": "status", "status": "listening"})
+                        except Exception as tts_err:
+                            if not await _report_voice_error(send_event, tts_err):
+                                break
+
+                        if not await send_event(
+                            {
+                                "type": "transcript",
+                                "role": "model",
+                                "text": examiner_text,
+                            }
+                        ):
+                            break
+                        if turn_audio and not await send_event(
+                            {
+                                "type": "audio",
+                                "data": turn_audio,
+                                "mimeType": turn_mime,
+                            }
+                        ):
+                            break
+
+                        if client_closed.is_set():
+                            break
+                        if remaining <= 10:
+                            await asyncio.sleep(4)
+                            client_closed.set()
+                            break
+                        if not await send_event({"type": "status", "status": "listening"}):
+                            break
 
             finally:
                 timer_handle.cancel()
+                try:
+                    await timer_handle
+                except asyncio.CancelledError:
+                    pass
 
             # Grade outside a transaction, then save the actual report before announcing completion.
-            try:
-                await ws.send_json({"type": "status", "status": "evaluating"})
-            except Exception:
-                pass  # A disconnected apprentice can retrieve the saved report later.
+            await send_event({"type": "status", "status": "evaluating"})
             elapsed = time.monotonic() - start_time
             try:
                 report = await live_evaluation.evaluate(
@@ -481,23 +513,19 @@ async def live_interview_ws(ws: WebSocket):
 
             # Send final ended status
             elapsed = time.monotonic() - start_time
-            try:
-                await ws.send_json(
-                    {
-                        "type": "status",
-                        "status": "ended",
-                        "duration": report["duration_seconds"],
-                    }
-                )
-            except Exception:
-                pass
+            await send_event(
+                {
+                    "type": "status",
+                    "status": "ended",
+                    "duration": report["duration_seconds"],
+                }
+            )
 
         except Exception as exc:
-            logger.exception("Live interview error: %s", exc)
-            try:
-                await ws.send_json({"type": "error", "message": f"Interview error: {exc}"})
-            except Exception:
-                pass
+            logger.error("Live interview error: %s", type(exc).__name__)
+            await send_event(
+                {"type": "error", "message": "Interview unavailable. Please try again."}
+            )
         finally:
             try:
                 await ws.close()

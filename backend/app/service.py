@@ -199,32 +199,34 @@ def voice_input_started(database,sid,actor,epoch,item_id):
         connection=db.scalar(select(VoiceConnection).where(VoiceConnection.session_id==sid,VoiceConnection.epoch==epoch))
         if not connection or connection.status!='active':raise DomainError(409,'connection_expired','Voice connection is no longer active')
         # Replayed VAD must never reset the ten-second deadline.
-        if connection.pending_utterance_id:
-            if connection.pending_utterance_id==str(item_id):return _pending_state(connection)
-            if connection.drain_started_at:raise DomainError(409,'utterance_draining','The interview is finishing the accepted utterance')
-            return _pending_state(connection)
+        if connection.pending_utterance_id==item_id:return _pending_state(connection)
+        receipt=db.scalar(select(ProviderReceipt).where(ProviderReceipt.session_id==sid,ProviderReceipt.epoch==epoch,ProviderReceipt.semantic_key==item_id))
+        if receipt:return _pending_state(connection)
         if connection.drain_started_at:raise DomainError(409,'utterance_draining','The interview is finishing the accepted utterance')
         check_active(session,database.settings)
-        connection.pending_utterance_id=str(item_id);connection.pending_since=now()
+        if not session.current_question:raise DomainError(409,'question_conflict','Answer the current question')
+        db.add(ProviderReceipt(session_id=sid,epoch=epoch,event_id=item_id,semantic_key=item_id))
+        if connection.pending_utterance_id:return _pending_state(connection)
+        connection.pending_utterance_id=item_id;connection.pending_question_id=session.current_question['id'];connection.pending_since=now()
         return _pending_state(connection)
 
 
-def voice_input_finished(database,sid,actor,epoch,item_id=None):
+def voice_input_finished(database,sid,actor,epoch,item_id):
     with _LOCK,database.session_factory.begin() as db:
         session=owned(db,sid,actor,True)
         if session.connection_epoch!=epoch:return False
         connection=db.scalar(select(VoiceConnection).where(VoiceConnection.session_id==sid,VoiceConnection.epoch==epoch))
-        if not connection or (item_id is not None and connection.pending_utterance_id!=str(item_id)):return False
-        connection.pending_utterance_id=None;connection.pending_since=None
+        if not connection or connection.pending_utterance_id!=item_id:return False
+        connection.pending_utterance_id=None;connection.pending_question_id=None;connection.pending_since=None
         return True
 
 
 def _pending_interrupt(db,session,connection):
     if connection and connection.pending_utterance_id:
-        question_id=session.current_question['id'] if session.current_question else None
+        question_id=connection.pending_question_id
         add_turn(db,session,'learner','[Speech did not finalize before the interview stopped.]',question_id,'voice',
             client_id=f'voice-interrupted:{connection.epoch}:{connection.pending_utterance_id}',delivery='interrupted')
-        connection.pending_utterance_id=None;connection.pending_since=None
+        connection.pending_utterance_id=None;connection.pending_question_id=None;connection.pending_since=None
 
 
 def finish(db,session,settings,reason='learner_finished',increment_revision=True):
@@ -263,6 +265,9 @@ def accept_answer(db,session,payload,settings,plan,mode='text'):
             raise DomainError(409,'turn_conflict','This turn ID already contains another answer')
         return {'session':public_session(db,session,settings),'turn':turn_dict(previous)}
     pending=_pending_connection(db,session) if mode=='voice' else None
+    if pending and (payload['client_turn_id']!=f'voice:{pending.epoch}:{pending.pending_utterance_id}' or
+            not pending.pending_question_id or pending.pending_question_id!=payload['question_id']):
+        pending=None
     drain=_pending_state(pending)
     allow_grace=drain['pending'] and (not pending.drain_started_at or drain['remaining_seconds']>0)
     revision(session,payload['expected_revision']);check_active(session,settings,allow_grace=allow_grace)
@@ -275,7 +280,7 @@ def accept_answer(db,session,payload,settings,plan,mode='text'):
     turn=add_turn(db,session,'learner',payload['text'],payload['question_id'],mode,payload['client_turn_id'],replacement_id=session.pending_replacement_id)
     session.pending_replacement_id=None
     if pending:
-        pending.pending_utterance_id=None;pending.pending_since=None
+        pending.pending_utterance_id=None;pending.pending_question_id=None;pending.pending_since=None
     coverage=copy.deepcopy(session.coverage)
     item=coverage[session.current_index];item['answer_turn_ids'].append(turn.id)
     if plan.get('action')=='ask_follow_up' and item.get('follow_up_count',0)==0 and not session.current_question.get('is_follow_up'):
@@ -388,16 +393,24 @@ def commit_voice_turn(database,sid,actor,epoch,event_id,content):
                 raise DomainError(409,'turn_conflict','A provider item ID cannot change its committed answer')
             return previous.response
         if not content.strip():return None
-        drain=_pending_state(_pending_connection(db,session))
+        connection=db.scalar(select(VoiceConnection).where(VoiceConnection.session_id==sid,VoiceConnection.epoch==epoch))
+        if (not connection or connection.status!='active' or connection.pending_utterance_id!=event_id or
+                not connection.pending_question_id or not session.current_question or
+                connection.pending_question_id!=session.current_question['id']):
+            raise DomainError(409,'utterance_not_accepted','Voice input was not accepted for this question')
+        drain=_pending_state(connection)
         check_active(session,database.settings,allow_grace=drain['pending'] and drain['remaining_seconds']>0)
-        payload={'expected_revision':session.revision,'question_id':session.current_question['id'] if session.current_question else '', 'client_turn_id':f'voice:{epoch}:{event_id}','text':content.strip()}
+        payload={'expected_revision':session.revision,'question_id':connection.pending_question_id,'client_turn_id':f'voice:{epoch}:{event_id}','text':content.strip()}
     from .provider import plan_follow_up
     plan=plan_follow_up(answer_context(database,sid,actor,payload))
     def accept(db):
         session=owned(db,sid,actor,True)
         if session.connection_epoch!=epoch:raise DomainError(409,'connection_expired','Voice connection is no longer active')
-        receipt=db.scalar(select(ProviderReceipt).where(ProviderReceipt.session_id==sid,ProviderReceipt.epoch==epoch,ProviderReceipt.semantic_key==event_id))
-        if not receipt:db.add(ProviderReceipt(session_id=sid,epoch=epoch,event_id=event_id,semantic_key=event_id))
+        connection=db.scalar(select(VoiceConnection).where(VoiceConnection.session_id==sid,VoiceConnection.epoch==epoch))
+        if (not connection or connection.status!='active' or connection.pending_utterance_id!=event_id or
+                not connection.pending_question_id or connection.pending_question_id!=payload['question_id'] or
+                not session.current_question or connection.pending_question_id!=session.current_question['id']):
+            raise DomainError(409,'utterance_not_accepted','Voice input was not accepted for this question')
         return accept_answer(db,session,payload,database.settings,plan,'voice')
     return mutate(database,actor,f'/voice/{sid}/{epoch}',event_id,payload,accept,sid)
 

@@ -26,6 +26,7 @@ export default defineConfig({
       url: 'http://127.0.0.1:8002/api/v1/health',
       env: {
         APP_ENV: 'test', AI_PROVIDER: 'fixture', GEMINI_API_KEY: '', GEMINI_MODEL: '', ENABLE_LIVE_EXTRACTION: 'false',
+        ENABLE_LIVE_GAP_GENERATION: 'false', ENABLE_LIVE_QA: 'false',
         DEMO_SEED_STATE: 'approved_baseline',
         DATABASE_URL: `sqlite:///../test-results/learning-${Date.now()}.db`,
         COURSE_VIDEO_URL: 'http://127.0.0.1:5174/e2e/fixtures/lesson.webm',

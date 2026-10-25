@@ -26,7 +26,7 @@ FALLBACKS = {
 }
 
 
-def detect_gaps(knowledge_units):
+def detect_gaps(knowledge_units, *, excluded_pairs=()):
     candidates = []
     for index, unit in enumerate(knowledge_units):
         unit = unit.model_dump() if hasattr(unit, "model_dump") else unit
@@ -45,6 +45,8 @@ def detect_gaps(knowledge_units):
         action = unit["action"]
         action = action[:1].lower() + action[1:]
         for gap_type, priority in gaps:
+            if (unit["id"], gap_type) in excluded_pairs:
+                continue
             question = TEMPLATES[gap_type].format(action=action) if action else FALLBACKS[gap_type]
             candidates.append(
                 (

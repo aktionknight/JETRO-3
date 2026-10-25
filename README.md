@@ -83,6 +83,15 @@ Reset refuses a non-demo database and active connections/jobs. It preserves appr
 
 Transcripts and reports are sensitive learner data. Raw audio/video retention is disabled. Scope access to the original attempt owner and release, keep provider keys out of browser configuration/logs, and back up the database and media together. Reports use immutable source identifiers; expired file links should be resolved again through the authorized API.
 
+### Voice ownership schema rollout
+
+Migration `0004_voice_question_ownership` stores the question that accepted each pending voice item. Stop all old API/worker writers, back up the database, set `VIVA_DATABASE_URL` to that database, then run `alembic -c alembic.ini upgrade head` from `backend/` using the backend environment. Start only the new API/worker version afterward; mixed versions are unsupported. Demo `create_all` does not upgrade existing tables.
+
+For an unversioned existing database, compare its complete schema against the historical migrations before choosing a baseline. Do not blindly stamp a revision or reset data. Reconcile the baseline separately, preserving learner records, before upgrading.
+
+Legacy pending items have unknown question ownership and cannot become finalized answers. Downgrading to `0003_pending_voice` drops only the new nullable ownership column; transcripts/reports remain, but captured pending question ownership is lost.
+
+
 ## Production readiness
 
 This repository implements the Viva application and its local demo foundation. Production rollout still requires configuring and testing the organizational OIDC issuer and tenant assignment, reviewed task-specific rubrics, actual provider compatibility checks, an expert-calibrated evaluation benchmark, infrastructure deployment, restore exercises, and measured load/accessibility checks. The specification's production roadmap is a release checklist, not a claim those operational activities have occurred.

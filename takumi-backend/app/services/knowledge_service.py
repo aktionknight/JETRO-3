@@ -36,7 +36,7 @@ def read_draft(session, task_id):
 def apply_field_updates(unit, fields, evidence_id):
     result = deepcopy(unit)
     for field, value in fields.items():
-        if result.get(field) == value:
+        if result.get(field) == value and (evidence_id is None or value is None):
             continue
         result[field] = value
         support = result.setdefault("field_evidence", {})

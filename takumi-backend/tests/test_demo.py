@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import func, select
 
-from app.models.entities import Release, Task
+from app.models.entities import Draft, DraftRevision, Evidence, Release, Task
 from app.services.seed_service import reset_demo, seed_demo
 from tests.conftest import auth
 
@@ -86,6 +86,8 @@ def test_user_task_survives_reset(client):
 
 
 def test_baseline_failure_rolls_back_whole_reset(client, monkeypatch):
+    headers = auth(client, "reviewer")
+    before = client.get("/api/v1/tasks/task_001/draft", headers=headers).json()
     from app.services import publication_service
 
     def fail(*args, **kwargs):
@@ -98,3 +100,90 @@ def test_baseline_failure_rolls_back_whole_reset(client, monkeypatch):
     with client.app.state.sessionmaker() as session:
         assert session.get(Task, "task_001").active_release_id is None
         assert session.scalar(select(func.count()).select_from(Release)) == 0
+        assert session.get(Draft, "draft_001").revision == before["revision"]
+        assert session.get(Draft, "draft_001").knowledge_units == before["knowledge_units"]
+        assert session.scalar(select(func.count()).select_from(DraftRevision)) == 1
+    assert client.get("/api/v1/tasks/task_001/draft", headers=headers).json() == before
+
+
+@pytest.mark.parametrize(
+    "initial_state,target_state,old_revision,new_revision",
+    [
+        ("fresh", "fresh", 1, 2),
+        ("fresh", "approved_baseline", 1, 3),
+        ("approved_baseline", "fresh", 2, 3),
+        ("approved_baseline", "approved_baseline", 2, 4),
+    ],
+)
+def test_reset_revisions_reject_cached_writes(
+    make_client, initial_state, target_state, old_revision, new_revision
+):
+    with make_client(demo_seed_state=initial_state) as client:
+        headers = auth(client, "reviewer")
+        path = "/api/v1/tasks/task_001/draft"
+        assert client.get(path, headers=headers).json()["revision"] == old_revision
+        for _ in range(2):
+            response = client.post(
+                "/api/v1/demo/reset", headers=headers, json={**RESET, "state": target_state}
+            )
+            assert response.status_code == 200
+            current = client.get(path, headers=headers).json()
+            assert current["draft_id"] == "draft_001"
+            assert current["task_id"] == "task_001"
+            assert current["revision"] == new_revision
+            assert [row["id"] for row in current["clarifications"]] == [
+                "clar_001", "clar_002", "clar_003"
+            ]
+            seeded_revision = old_revision + 1
+            with client.app.state.sessionmaker() as session:
+                history = session.scalars(
+                    select(DraftRevision).order_by(DraftRevision.revision)
+                ).all()
+                expected = (
+                    [seeded_revision, new_revision]
+                    if target_state == "approved_baseline" else [new_revision]
+                )
+                assert [row.revision for row in history] == expected
+                assert history[-1].knowledge_units == current["knowledge_units"]
+                assert history[0].knowledge_units[0]["interpretation"] is None
+                release = session.get(Release, "release_001")
+                if target_state == "approved_baseline":
+                    assert release.source_draft_revision == new_revision
+                else:
+                    assert release is None
+                evidence_ids = list(session.scalars(select(Evidence.id).order_by(Evidence.id)))
+                history_count = len(history)
+            payload = {
+                "expected_revision": old_revision,
+                "changes": [{"knowledge_unit_id": "ku_001", "fields": {"action": "Recheck"}}],
+            }
+            stale = client.patch(path, headers=headers, json=payload)
+            assert stale.status_code == 409
+            assert stale.json()["error"]["code"] == "REVISION_CONFLICT"
+            assert stale.json()["error"]["details"] == {
+                "expected": old_revision, "actual": new_revision
+            }
+            with client.app.state.sessionmaker() as session:
+                assert session.get(Draft, "draft_001").knowledge_units == current["knowledge_units"]
+                assert list(session.scalars(select(Evidence.id).order_by(Evidence.id))) == evidence_ids
+                assert session.scalar(select(func.count()).select_from(DraftRevision)) == history_count
+            updated = client.patch(
+                path, headers=headers, json={**payload, "expected_revision": new_revision}
+            )
+            assert updated.status_code == 200
+            assert updated.json()["revision"] == new_revision + 1
+            old_revision = new_revision + 1
+            new_revision = old_revision + (2 if target_state == "approved_baseline" else 1)
+
+
+@pytest.mark.parametrize("state,revision", [("fresh", 1), ("approved_baseline", 2)])
+def test_reset_without_fixture_starts_revision_sequence(make_client, state, revision):
+    with make_client(enable_demo_seed=False) as client:
+        headers = auth(client, "reviewer")
+        response = client.post(
+            "/api/v1/demo/reset", headers=headers, json={**RESET, "state": state}
+        )
+        assert response.status_code == 200
+        draft = client.get("/api/v1/tasks/task_001/draft", headers=headers).json()
+        assert draft["draft_id"] == "draft_001"
+        assert draft["revision"] == revision

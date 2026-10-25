@@ -100,6 +100,7 @@ class VoiceConnection(Base):
     epoch=Column(Integer,nullable=False)
     provider_call_id=Column(String,nullable=True)
     pending_utterance_id=Column(String,nullable=True)
+    pending_question_id=Column(String,nullable=True)
     pending_since=Column(DateTime(timezone=True),nullable=True)
     drain_started_at=Column(DateTime(timezone=True),nullable=True)
     status=Column(String,nullable=False,default='connecting')

@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import pytest
 from sqlalchemy import func, select
 
@@ -142,6 +144,56 @@ def test_answer_without_update_links_evidence(client):
     unit = draft["knowledge_units"][0]
     assert response.json()["evidence_id"] in unit["evidence_ids"]
     assert unit["interpretation"] is None
+
+
+
+def test_same_text_confirmation_restores_action_support_and_allows_approval(client):
+    headers = auth(client, "reviewer")
+    draft_path = "/api/v1/tasks/task_001/draft"
+    with client.app.state.sessionmaker() as session, session.begin():
+        draft = session.get(Draft, "draft_001")
+        units = deepcopy(draft.knowledge_units)
+        action = units[0]["action"]
+        units[0]["field_evidence"].pop("action")
+        draft.knowledge_units = units
+    rejected = client.patch(
+        draft_path,
+        headers=headers,
+        json={
+            "expected_revision": 1,
+            "changes": [{"knowledge_unit_id": "ku_001", "operation": "approve"}],
+        },
+    )
+    assert rejected.status_code == 409
+    assert rejected.json()["error"]["details"]["fields"] == ["action"]
+    response = client.post(
+        PATH,
+        headers=headers,
+        json={
+            "expected_draft_revision": 1,
+            "disposition": "answered",
+            "answer": "I confirm this action exactly as written.",
+            "knowledge_update": {"knowledge_unit_id": "ku_001", "fields": {"action": action}},
+        },
+    )
+    assert response.status_code == 200
+    evidence_id = response.json()["evidence_id"]
+    unit = client.get(draft_path, headers=headers).json()["knowledge_units"][0]
+    assert unit["action"] == action
+    assert unit["field_evidence"]["action"] == [evidence_id]
+    assert unit["evidence_ids"].count(evidence_id) == 1
+    assert unit["review_status"] == "draft"
+    approved = client.patch(
+        draft_path,
+        headers=headers,
+        json={
+            "expected_revision": 2,
+            "changes": [{"knowledge_unit_id": "ku_001", "operation": "approve"}],
+        },
+    )
+    assert approved.status_code == 200
+    unit = client.get(draft_path, headers=headers).json()["knowledge_units"][0]
+    assert unit["review_status"] == "approved"
 
 
 def test_failure_rolls_back_every_write(make_client, monkeypatch):

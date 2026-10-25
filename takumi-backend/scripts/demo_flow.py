@@ -126,9 +126,10 @@ def run_flow(client, record=None) -> None:
     step("reject-release-edit")
     assert last[4]["error"]["code"] == "METHOD_NOT_ALLOWED"
     step("check-immutable")
+    previous_revision = draft["revision"]
     request("POST", "/demo/reset", reset, reviewer)
     draft = request("GET", "/tasks/task_001/draft", headers=expert)
-    assert draft["revision"] == 1
+    assert draft["revision"] == previous_revision + 1
     assert draft["knowledge_units"][0]["interpretation"] is None
     step("reset-repeatable")
 

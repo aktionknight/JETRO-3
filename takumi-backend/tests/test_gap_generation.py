@@ -362,3 +362,71 @@ def test_live_logging_disabled_still_keeps_receipt(make_client, monkeypatch):
             run = session.get(KnowledgeAIRun, result["generation_id"])
             assert run.usage is run.latency_ms is None
             assert run.output["response"]["questions"] == []
+
+
+@pytest.mark.parametrize("mode", ["deterministic", "fallback"])
+@pytest.mark.parametrize(
+    "disposition", ["pending", "answered", "premise_rejected", "unobservable", "deferred"]
+)
+def test_deterministic_batches_use_full_history_before_ranking(
+    make_client, monkeypatch, mode, disposition
+):
+    with make_client(**LIVE) as client:
+        headers, draft, body = setup(client)
+        with client.app.state.sessionmaker() as session, session.begin():
+            for row in session.scalars(select(Clarification)):
+                row.status = disposition
+            # Push all fixture questions outside the model's last-30 history window.
+            for index in range(35):
+                session.add(
+                    Clarification(
+                        id=f"history-{index:03}",
+                        task_id="task_001",
+                        draft_id=draft["draft_id"],
+                        knowledge_unit_id="ku_001",
+                        question=f"Earlier contextual question {index}?",
+                        gap_type="missing_cue",
+                        priority=1,
+                        status=disposition,
+                    )
+                )
+
+        def fail(data):
+            assert len(data["clarifications"]) == 30
+            assert not {"clar_001", "clar_002", "clar_003"} & {
+                row["id"] for row in data["clarifications"]
+            }
+            raise ProviderError("PROCESSING_TIMEOUT", "AI request timed out.", True)
+
+        calls, closed = install(monkeypatch, fail)
+        before = counts(client)
+        expected_batches = [
+            [("ku_003", "missing_reasoning", 10), ("ku_002", "beginner_mistake", 2)],
+            [("ku_003", "beginner_mistake", 2)],
+            [],
+        ]
+        for index, expected in enumerate(expected_batches):
+            request = {
+                **body,
+                "mode": "live" if mode == "fallback" else "deterministic",
+                "request_id": f"batch-{index}",
+            }
+            response = client.post(PATH, headers=headers, json=request)
+            assert response.status_code == 200, response.text
+            result = response.json()
+            assert result["generation_mode"] == mode
+            assert [
+                (row["knowledge_unit_id"], row["gap_type"], row["priority"])
+                for row in result["questions"]
+            ] == expected
+            assert result["revision"] == draft["revision"]
+            assert "CONTEXT_TRUNCATED" in result["warnings"]
+            after = counts(client)
+            assert client.post(PATH, headers=headers, json=request).json() == result
+            assert counts(client) == after
+            with client.app.state.sessionmaker() as session, session.begin():
+                assert session.get(Draft, draft["draft_id"]).revision == draft["revision"]
+                for question in result["questions"]:
+                    session.get(Clarification, question["id"]).status = disposition
+        assert counts(client) == (before[0] + 3, before[1] + 3)
+        assert len(calls) == len(closed) == (3 if mode == "fallback" else 0)

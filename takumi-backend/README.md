@@ -38,6 +38,7 @@ The flow requires a running server (see Start). It logs 16 successful steps, res
 uv run python scripts/reset_demo.py --state fresh --yes
 ```
 This replaces only fixture task `task_001` and its related records; user-created tasks survive. It refuses production/non-demo deployments. API reset requires reviewer auth and `confirm: "RESET_DEMO_DATA"`. Choose `fresh` before a live expert demonstration; choose `approved_baseline` for an immediately usable apprentice pack. Attempts belong to the scenario engine and cannot be reset here.
+Fixture resets preserve IDs but advance draft revisions: fresh reset increments the previous revision by one; approved baseline increments it by two because confirmation precedes publication. Discard cached drafts after reset; stale PATCH requests return `409 REVISION_CONFLICT`.
 
 ## API
 Interactive docs: `/docs`. Generated schema: `contracts/openapi.json`. Teammate guide: [INTEGRATION_HANDOFF.md](docs/INTEGRATION_HANDOFF.md). Regenerate checked-in examples and schemas:

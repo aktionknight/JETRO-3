@@ -15,7 +15,7 @@ class VoiceProtocolTests(unittest.TestCase):
         self.assertIsNone(normalize_event({'type':'response.done'}))
         self.assertEqual(normalize_event({'type':'output_audio_buffer.stopped'})['kind'],'delivered')
     def test_interruption_has_own_event(self):
-        self.assertEqual(normalize_event({'type':'input_audio_buffer.speech_started'})['kind'],'interruption')
+        self.assertEqual(normalize_event({'type':'input_audio_buffer.speech_started','item_id':'utterance'}),{'kind':'interruption','item_id':'utterance'})
     def test_automatic_responses_disabled(self):
         config=voice_session_config('gpt-realtime')
         self.assertFalse(config['audio']['input']['turn_detection']['create_response'])
@@ -27,5 +27,19 @@ class VoiceProtocolTests(unittest.TestCase):
     def test_empty_or_oversized_utterance_rejected(self):
         for value in ('', ' '*10, 'x'*10001):
             self.assertIsNone(normalize_event({'type':'conversation.item.input_audio_transcription.completed','item_id':'u','transcript':value}))
+
+    def test_transport_replays_keep_semantic_identity(self):
+        for kind in ('input_audio_buffer.speech_started','conversation.item.input_audio_transcription.completed'):
+            first=normalize_event({'type':kind,'event_id':'transport-a','item_id':'utterance','transcript':'My reasoning'})
+            replay=normalize_event({'type':kind,'event_id':'transport-b','item_id':'utterance','transcript':'My reasoning'})
+            self.assertEqual(first,replay)
+
+    def test_invalid_semantic_item_ids_are_rejected(self):
+        for kind in ('input_audio_buffer.speech_started','conversation.item.input_audio_transcription.completed'):
+            for identity in (None,0,False,[],{},'', 'x'*129):
+                with self.subTest(kind=kind,identity=identity):
+                    self.assertIsNone(normalize_event({'type':kind,'item_id':identity,'transcript':'My reasoning'}))
+            self.assertIsNone(normalize_event({'type':kind,'event_id':'transport-only','transcript':'My reasoning'}))
+            self.assertIsNotNone(normalize_event({'type':kind,'item_id':'x'*128,'transcript':'My reasoning'}))
 
 if __name__=='__main__':unittest.main()

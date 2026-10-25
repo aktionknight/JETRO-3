@@ -70,6 +70,46 @@ def test_fixture_priority_and_fallback():
     assert gaps[0].question == "What observation prompts this step, and what does it tell you?"
 
 
+def test_detector_excludes_pairs_before_distinct_type_selection():
+    fixture = json.loads(FIXTURE_PATH.read_text())
+    units = fixture["draft"]["knowledge_units"]
+    prior = {
+        ("ku_001", "missing_reasoning"),
+        ("ku_002", "changed_condition"),
+        ("ku_001", "beginner_mistake"),
+    }
+    first = detect_gaps(units, excluded_pairs=prior)
+    assert [(gap.knowledge_unit_id, gap.gap_type, gap.priority) for gap in first] == [
+        ("ku_003", "missing_reasoning", 10),
+        ("ku_002", "beginner_mistake", 2),
+    ]
+    prior.update((gap.knowledge_unit_id, gap.gap_type) for gap in first)
+    second = detect_gaps(units, excluded_pairs=prior)
+    assert [(gap.knowledge_unit_id, gap.gap_type, gap.priority) for gap in second] == [
+        ("ku_003", "beginner_mistake", 2),
+    ]
+    prior.update((gap.knowledge_unit_id, gap.gap_type) for gap in second)
+    assert detect_gaps(units, excluded_pairs=prior) == []
+
+
+@pytest.mark.parametrize("state,expected", [("fresh", 41), ("approved_baseline", 42)])
+def test_seed_initial_revision_sets_matching_snapshots(make_client, state, expected):
+    with make_client(enable_demo_seed=False) as client:
+        with client.app.state.sessionmaker() as session, session.begin():
+            assert seed_demo(session, state, initial_revision=41) is True
+        with client.app.state.sessionmaker() as session:
+            draft = session.get(Draft, "draft_001")
+            history = session.scalars(
+                select(DraftRevision).order_by(DraftRevision.revision)
+            ).all()
+            assert draft.revision == expected
+            assert [row.revision for row in history] == list(range(41, expected + 1))
+            assert history[-1].knowledge_units == draft.knowledge_units
+        with client.app.state.sessionmaker() as session, session.begin():
+            assert seed_demo(session, state, initial_revision=99) is False
+            assert session.get(Draft, "draft_001").revision == expected
+
+
 def test_unknown_fixture():
     with pytest.raises(AppError) as exc:
         FixtureAIProvider().extract_knowledge(

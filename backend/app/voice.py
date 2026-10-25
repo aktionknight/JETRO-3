@@ -196,8 +196,8 @@ async def _sideband(socket,database,sid,actor,epoch,reservation,ready):
             elif kind=='interruption':
                 item=event.get('item_id')
                 if item and sid not in _DRAINING:
-                    pending_done.clear()
-                    await asyncio.to_thread(service.voice_input_started,database,sid,actor,epoch,item)
+                    pending=await asyncio.to_thread(service.voice_input_started,database,sid,actor,epoch,item)
+                    if pending['pending'] and pending['id']==item:pending_done.clear()
                 if state['speaking']:
                     turn=responses.get(state['response_id'])
                     if turn is not None:await asyncio.to_thread(service.mark_question_delivered,database,sid,actor,epoch,'interrupted',turn)
@@ -214,7 +214,8 @@ async def _sideband(socket,database,sid,actor,epoch,reservation,ready):
                 except ProviderUnavailable:break
                 finally:
                     await asyncio.to_thread(service.voice_input_finished,database,sid,actor,epoch,event['id'])
-                    pending_done.set()
+                    pending=await asyncio.to_thread(service.pending_voice_input,database,sid,actor)
+                    if not pending['pending']:pending_done.set()
             elif kind=='error':break
     except (asyncio.CancelledError,Exception):
         pass
