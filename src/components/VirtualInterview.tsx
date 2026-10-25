@@ -31,7 +31,14 @@ const SpeechRecognitionAPI: any =
     : null;
 
 export default function VirtualInterview({ token, onEnd }: VirtualInterviewProps) {
-  const [status, setStatus] = useState<Status>('idle');
+  const [status, storeStatus] = useState<Status>('idle');
+  const statusRef = useRef<Status>('idle');
+  const mutedRef = useRef(false);
+  const setStatus = useCallback((next: Status | ((current: Status) => Status)) => {
+    const value = typeof next === 'function' ? next(statusRef.current) : next;
+    statusRef.current = value;
+    storeStatus(value);
+  }, []);
   const [error, setError] = useState('');
   const [remaining, setRemaining] = useState(120);
   const [elapsed, setElapsed] = useState(0);
@@ -45,6 +52,9 @@ export default function VirtualInterview({ token, onEnd }: VirtualInterviewProps
   const playbackContextRef = useRef<AudioContext | null>(null);
   const playbackQueueRef = useRef<ArrayBuffer[]>([]);
   const isPlayingRef = useRef(false);
+  const playbackEpochRef = useRef(0);
+  const playbackSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const finishPlaybackRef = useRef<(() => void) | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
   const interimTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -58,7 +68,21 @@ export default function VirtualInterview({ token, onEnd }: VirtualInterviewProps
 
   // Clean up audio
   const stopAudio = useCallback(() => {
+    playbackEpochRef.current += 1;
+    if (interimTimeoutRef.current) {
+      clearTimeout(interimTimeoutRef.current);
+      interimTimeoutRef.current = null;
+    }
+    if (playbackSourceRef.current) {
+      try { playbackSourceRef.current.stop(); } catch { /* Already stopped. */ }
+      playbackSourceRef.current = null;
+    }
+    finishPlaybackRef.current?.();
+    finishPlaybackRef.current = null;
     if (recognitionRef.current) {
+      recognitionRef.current.onend = null;
+      recognitionRef.current.onresult = null;
+      recognitionRef.current.onerror = null;
       try {
         recognitionRef.current.stop();
       } catch {
@@ -81,9 +105,10 @@ export default function VirtualInterview({ token, onEnd }: VirtualInterviewProps
   // Send apprentice turn to backend
   const sendAnswer = useCallback((textToSend: string) => {
     const trimmed = textToSend.trim();
-    if (!trimmed || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-
+    if (!trimmed || statusRef.current !== 'listening' || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    setStatus('thinking');
     if (recognitionRef.current) {
+      recognitionRef.current.onend = null;
       try {
         recognitionRef.current.stop();
       } catch {
@@ -97,145 +122,137 @@ export default function VirtualInterview({ token, onEnd }: VirtualInterviewProps
 
     setInterimSpeech('');
     setTypedInput('');
-    setStatus('thinking');
 
     wsRef.current.send(JSON.stringify({ type: 'user_turn', text: trimmed }));
-  }, []);
+  }, [setStatus]);
 
-  // Play incoming PCM 24kHz audio from Gemini TTS
+  // Keep the microphone closed until the entire examiner turn has played.
   const playAudioChunk = useCallback(async (base64Data: string) => {
+    const epoch = playbackEpochRef.current;
+    let ownsPlayback = false;
     try {
+      const binary = atob(base64Data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const samples = new Int16Array(bytes.buffer);
+      const floats = new Float32Array(samples.length);
+      for (let i = 0; i < samples.length; i++) floats[i] = samples[i] / 32768;
+      playbackQueueRef.current.push(floats.buffer);
+      if (isPlayingRef.current) return;
+      ownsPlayback = true;
+      isPlayingRef.current = true;
+      setStatus('speaking');
       if (!playbackContextRef.current || playbackContextRef.current.state === 'closed') {
         const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
         playbackContextRef.current = new AudioCtx({ sampleRate: 24000 });
       }
       const ctx = playbackContextRef.current;
-      if (ctx.state === 'suspended') {
-        await ctx.resume();
+      if (ctx.state === 'suspended') await ctx.resume();
+      while (epoch === playbackEpochRef.current && playbackQueueRef.current.length) {
+        const data = new Float32Array(playbackQueueRef.current.shift()!);
+        const buffer = ctx.createBuffer(1, data.length, 24000);
+        buffer.getChannelData(0).set(data);
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+        playbackSourceRef.current = source;
+        await new Promise<void>(resolve => {
+          finishPlaybackRef.current = resolve;
+          source.onended = () => resolve();
+          source.start();
+        });
+        if (playbackSourceRef.current === source) playbackSourceRef.current = null;
       }
-
-      const binary = atob(base64Data);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-
-      const samples = new Int16Array(bytes.buffer);
-      const float32 = new Float32Array(samples.length);
-      for (let i = 0; i < samples.length; i++) float32[i] = samples[i] / 32768;
-
-      const buffer = ctx.createBuffer(1, float32.length, 24000);
-      buffer.getChannelData(0).set(float32);
-
-      const arrayBuf = buffer.getChannelData(0).buffer.slice(0);
-      playbackQueueRef.current.push(arrayBuf);
-
-      if (!isPlayingRef.current) {
-        isPlayingRef.current = true;
-        setStatus('speaking');
-
-        while (playbackQueueRef.current.length > 0) {
-          const nextBuf = playbackQueueRef.current.shift()!;
-          const nextFloat = new Float32Array(nextBuf);
-          const audioBuffer = ctx.createBuffer(1, nextFloat.length, 24000);
-          audioBuffer.getChannelData(0).set(nextFloat);
-
-          const source = ctx.createBufferSource();
-          source.buffer = audioBuffer;
-          source.connect(ctx.destination);
-
-          await new Promise<void>((resolve) => {
-            source.onended = () => resolve();
-            source.start();
-          });
-        }
-
+    } catch {
+      if (epoch === playbackEpochRef.current) {
+        if (ownsPlayback) playbackQueueRef.current = [];
+        setError('Examiner audio could not play. Read the question and speak or type your answer.');
+      }
+    } finally {
+      if (ownsPlayback && epoch === playbackEpochRef.current) {
+        finishPlaybackRef.current = null;
         isPlayingRef.current = false;
-        setStatus('listening');
+        if (statusRef.current === 'speaking') setStatus('listening');
       }
-    } catch (err) {
-      console.warn('Audio playback error:', err);
     }
-  }, []);
+  }, [setStatus]);
 
-  // Initialize SpeechRecognition when in listening mode
+  // Each listening turn owns its recognizer; disposed callbacks cannot restart it.
   useEffect(() => {
-    if (status !== 'listening' || isMuted || !SpeechRecognitionAPI) {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {
-          // ignore
-        }
-      }
+    if (status !== 'listening' || isMuted) return;
+    if (!SpeechRecognitionAPI) {
+      setError('Voice recognition is unavailable in this browser. Type your answer below.');
       return;
     }
-
-    try {
-      const recognition = new SpeechRecognitionAPI();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      recognition.onresult = (event: any) => {
-        let finalStr = '';
-        let interimStr = '';
-
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const transcriptPiece = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            finalStr += transcriptPiece;
-          } else {
-            interimStr += transcriptPiece;
-          }
-        }
-
-        const currentText = (finalStr || interimStr).trim();
-        setInterimSpeech(currentText);
-
-        // Auto-send when user stops speaking for 1.8 seconds
-        if (interimTimeoutRef.current) {
-          clearTimeout(interimTimeoutRef.current);
-        }
-        if (currentText.length > 10) {
-          interimTimeoutRef.current = setTimeout(() => {
-            sendAnswer(currentText);
-          }, 1800);
-        }
-      };
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      recognition.onerror = (err: any) => {
-        console.debug('Speech recognition event:', err);
-      };
-
-      recognition.onend = () => {
-        // Restart if still in listening state and not unmounted
-        if (status === 'listening' && !isMuted) {
-          try {
-            recognition.start();
-          } catch {
-            // ignore
-          }
-        }
-      };
-
-      recognition.start();
-      recognitionRef.current = recognition;
-    } catch (err) {
-      console.debug('Speech recognition init:', err);
-    }
-
-    return () => {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {
-          // ignore
-        }
+    const recognition = new SpeechRecognitionAPI();
+    recognitionRef.current = recognition;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    let disposed = false;
+    let retryAllowed = true;
+    let failures = 0;
+    let prefix = '';
+    let latestText = '';
+    let restartTimer: ReturnType<typeof setTimeout> | null = null;
+    const active = () => !disposed && recognitionRef.current === recognition
+      && statusRef.current === 'listening' && !mutedRef.current;
+    const restart = () => {
+      if (!active() || !retryAllowed) return;
+      try { recognition.start(); }
+      catch {
+        if (++failures < 3) restartTimer = setTimeout(restart, 300);
+        else setError('Microphone could not restart. Toggle the microphone to retry, or type your answer.');
       }
+    };
+    recognition.onresult = (event: any) => {
+      if (!active()) return;
+      // resultIndex is only the changed suffix; rebuild all results to retain earlier words.
+      let text = '';
+      for (let index = 0; index < event.results.length; index++) {
+        text += event.results[index][0].transcript + ' ';
+      }
+      latestText = `${prefix} ${text}`.trim();
+      setInterimSpeech(latestText);
+      failures = 0;
+      if (interimTimeoutRef.current) clearTimeout(interimTimeoutRef.current);
+      if (latestText) {
+        interimTimeoutRef.current = setTimeout(() => {
+          if (active()) sendAnswer(latestText);
+        }, 1800);
+      }
+    };
+    recognition.onerror = (event: any) => {
+      if (!active()) return;
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        retryAllowed = false;
+        setError('Microphone permission was denied. Allow microphone access, then toggle the microphone to retry.');
+      } else if (event.error === 'audio-capture') {
+        retryAllowed = false;
+        setError('No microphone input is available. Check your microphone and toggle it to retry.');
+      } else if (event.error !== 'no-speech' && event.error !== 'aborted' && ++failures >= 3) {
+        retryAllowed = false;
+        setError('Speech recognition is unavailable. Toggle the microphone to retry, or type your answer.');
+      }
+    };
+    recognition.onend = () => {
+      if (!active() || !retryAllowed) return;
+      prefix = latestText;
+      restartTimer = setTimeout(restart, 250);
+    };
+    restart();
+    return () => {
+      disposed = true;
+      if (restartTimer) clearTimeout(restartTimer);
       if (interimTimeoutRef.current) {
         clearTimeout(interimTimeoutRef.current);
+        interimTimeoutRef.current = null;
       }
+      recognition.onend = null;
+      recognition.onresult = null;
+      recognition.onerror = null;
+      try { recognition.abort(); } catch { /* Already stopped. */ }
+      if (recognitionRef.current === recognition) recognitionRef.current = null;
     };
   }, [status, isMuted, sendAnswer]);
 
@@ -258,6 +275,7 @@ export default function VirtualInterview({ token, onEnd }: VirtualInterviewProps
 
   // Start interview session
   const startInterview = useCallback(async () => {
+    stopAudio();
     setStatus('connecting');
     setError('');
     setTranscript([]);
@@ -266,12 +284,17 @@ export default function VirtualInterview({ token, onEnd }: VirtualInterviewProps
     playbackQueueRef.current = [];
 
     try {
+      // Resume output from the Start click rather than a later WebSocket callback.
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      playbackContextRef.current = new AudioCtx({ sampleRate: 24000 });
+      await playbackContextRef.current.resume();
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${protocol}//${window.location.host}/api/v1/learning/interview/live?token=${encodeURIComponent(token)}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onmessage = (event) => {
+        if (wsRef.current !== ws) return;
         try {
           const msg = JSON.parse(event.data);
           switch (msg.type) {
@@ -280,7 +303,7 @@ export default function VirtualInterview({ token, onEnd }: VirtualInterviewProps
                 setStatus('ended');
                 stopAudio();
                 onEnd?.(msg.duration || elapsed);
-              } else {
+              } else if (msg.status !== 'listening' || !isPlayingRef.current) {
                 setStatus(msg.status as Status);
               }
               break;
@@ -312,12 +335,14 @@ export default function VirtualInterview({ token, onEnd }: VirtualInterviewProps
       };
 
       ws.onerror = () => {
+        if (wsRef.current !== ws) return;
         setError('Connection to live interview service failed.');
         setStatus('error');
         stopAudio();
       };
 
       ws.onclose = () => {
+        if (wsRef.current !== ws) return;
         setStatus((cur) => (cur !== 'ended' && cur !== 'error' ? 'ended' : cur));
         stopAudio();
       };
@@ -332,11 +357,15 @@ export default function VirtualInterview({ token, onEnd }: VirtualInterviewProps
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'end' }));
     }
-    stopAudio();
     setStatus('evaluating');
+    stopAudio();
   }, [stopAudio]);
 
-  const toggleMute = () => setIsMuted((m) => !m);
+  const toggleMute = () => {
+    mutedRef.current = !mutedRef.current;
+    setIsMuted(mutedRef.current);
+    setError('');
+  };
 
   useEffect(() => {
     return () => {

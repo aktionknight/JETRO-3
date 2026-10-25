@@ -305,14 +305,15 @@
   align-items: center !important;
   justify-content: space-between !important;
   gap: 16px !important;
-  padding: 6px 20px !important;
-  min-height: 42px;
+  padding: 8px 24px !important;
+  min-height: 64px !important;
+  max-height: 120px !important;
 }
 
 .learning-status-content {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
   flex: 1;
 }
@@ -322,21 +323,21 @@
   align-items: center;
   flex-shrink: 0;
   margin-left: auto;
-  padding-left: 14px;
+  padding-left: 18px;
   border-left: 1px solid #d7dfcf;
 }
 
 .learning-status-jetro-logo {
-  height: 22px;
+  height: 55px;
   width: auto;
-  max-width: 80px;
+  max-width: 200px;
   display: block;
   object-fit: contain;
-  opacity: 0.9;
+  opacity: 0.95;
   transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
 .learning-status-jetro-logo:hover {
   opacity: 1;
-  transform: scale(1.04);
+  transform: scale(1.05);
 }
