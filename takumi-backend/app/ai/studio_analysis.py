@@ -6,7 +6,7 @@ import time
 from typing import Literal
 
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from app.ai.base import ProviderError
@@ -80,6 +80,28 @@ class VideoObservations(StrictModel):
     observations: list[VideoObservation] = Field(max_length=20)
 
 
+def provider_schema(schema):
+    """Keep Gemini's decoding grammar small; Pydantic still enforces every limit."""
+
+    def simplify(node):
+        if isinstance(node, list):
+            return [simplify(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        result = {
+            key: simplify(value)
+            for key, value in node.items()
+            if key not in {"maxItems", "minItems", "maxLength", "minLength", "default", "title"}
+        }
+        if "properties" in result:
+            # Nullable fields use explicit null; gap arrays use [] instead of omission.
+            # This removes optional-property branches from the provider's grammar.
+            result["required"] = list(result["properties"])
+        return result
+
+    return simplify(schema.model_json_schema())
+
+
 class StudioAgents:
     def __init__(self, settings):
         self.model = settings.studio_model
@@ -118,7 +140,7 @@ class StudioAgents:
                 else prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
-                    response_json_schema=schema.model_json_schema(),
+                    response_json_schema=provider_schema(schema),
                     thinking_config=types.ThinkingConfig(thinking_level=self.thinking_level),
                     temperature=0,
                     max_output_tokens=16384,
@@ -126,6 +148,20 @@ class StudioAgents:
             )
             return schema.model_validate_json(response.text)
         except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Studio provider call failed: model=%s schema=%s exception=%s status=%s",
+                self.model,
+                schema.__name__,
+                type(exc).__name__,
+                getattr(exc, "code", None),
+            )
+            if isinstance(exc, errors.ClientError) and exc.code == 400:
+                raise ProviderError(
+                    "AI_PROVIDER_INVALID_REQUEST",
+                    "Gemini rejected the extraction request (HTTP 400). "
+                    "Check the structured-output schema and model configuration.",
+                    False,
+                ) from None
             if isinstance(exc, (ValueError, TypeError)):
                 raise ProviderError(
                     "AI_OUTPUT_INVALID", "AI returned invalid structured output.", False
@@ -276,6 +312,8 @@ class StudioAgents:
             "Otherwise set suggested_fix to null and ask a specific neutral expert_question "
             "about this action, without assuming a cause, sensation, limit or correct answer. "
             "Do not invent procedural advice to fill a gap. Do not flag irrelevant gestures. "
+            "Return at most four gaps per new unit, or twenty-four mapped gaps for an existing "
+            "draft. Use null for unknown optional text and [] when there are no gaps. "
             "Preserve uncertainty, negation and conditions in every quote."
         )
 
