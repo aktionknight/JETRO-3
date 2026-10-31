@@ -22,13 +22,19 @@ Takumi captures it while the expert is still here, keeps a human in charge of wh
 ## How it works
 
 ```mermaid
-flowchart LR
-  A["🎥 Expert records<br>a video of the task"] --> B["🤖 AI drafts steps,<br>reasons and warnings"]
-  B --> C["❓ AI asks the expert<br>about gaps"]
-  C --> D["✅ Expert reviews<br>and publishes"]
-  D --> E["📚 Apprentice studies<br>course + 3D simulation"]
-  E --> F["🎙️ AI examiner<br>interviews apprentice"]
-  F --> G["📄 Report linked<br>to approved sources"]
+flowchart TB
+  subgraph S1["1 · Capture (Expert Studio)"]
+    direction LR
+    A["🎥 Expert records<br>a video of the task"] --> B["🤖 AI drafts steps,<br>reasons and warnings"]
+    B --> C["❓ AI asks the expert<br>about gaps"]
+    C --> D["✅ Expert reviews<br>and publishes"]
+  end
+  subgraph S2["2 · Learn (Playground + Viva)"]
+    direction LR
+    E["📚 Apprentice studies<br>course + 3D simulation"] --> F["🎙️ AI examiner<br>interviews apprentice"]
+    F --> G["📄 Report linked<br>to approved sources"]
+  end
+  S1 --> S2
 ```
 
 | Part | Who uses it | What it does |
