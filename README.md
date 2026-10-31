@@ -105,9 +105,6 @@ Demo mode runs offline with clearly labelled sample data. Add API keys to `.env`
 
 ## Team
 
-| | |
-| --- | --- |
-| [@aktionknight](https://github.com/aktionknight) | [@himanishpuri](https://github.com/himanishpuri) |
-| [@ManasMehta12](https://github.com/ManasMehta12) | [@sauryagur](https://github.com/sauryagur) |
+[@aktionknight](https://github.com/aktionknight) · [@himanishpuri](https://github.com/himanishpuri) · [@ManasMehta12](https://github.com/ManasMehta12) · [@sauryagur](https://github.com/sauryagur)
 
 > Demo content is illustrative. It must not be used for real torque, tolerance or safety decisions.
